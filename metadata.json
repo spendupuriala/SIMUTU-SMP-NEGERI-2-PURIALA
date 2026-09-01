@@ -1,0 +1,6 @@
+{
+  "name": "SIMUTU SMP NEGERI 2 PURIALA",
+  "description": "Sistem Informasi Penjaminan Mutu (SIMUTU) SMP Negeri 2 Puriala. Aplikasi manajemen kurikulum, program kerja, analisis nilai akademis, supervisi guru, dan bank data dokumen KOSP.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
