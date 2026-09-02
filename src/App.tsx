@@ -7,6 +7,9 @@ import SupervisiGuruView from './components/SupervisiGuru';
 import DokumenKurikulumView from './components/DokumenKurikulum';
 import JurnalMengajarView from './components/JurnalMengajar';
 import AnalisisJurnal from './components/AnalisisJurnal';
+import { User } from 'firebase/auth';
+import { initAuth, googleSignIn, googleSignOut } from './lib/googleDriveAuth';
+import { fetchGoogleSheetValuesWithToken, parseSheetValuesToNilai, parseSheetValuesToJurnal, findSpreadsheetByName } from './lib/googleDriveApi';
 import { 
   ProgramKerja, 
   SiswaNilai, 
@@ -38,12 +41,66 @@ import {
   HelpCircle, 
   CheckCircle,
   Clock,
-  Menu
+  Menu,
+  Search,
+  LogOut
 } from 'lucide-react';
 
 export default function App() {
   // Navigation active tab State
   const [activeTab, setActiveTab] = useState<string>('dashboard');
+
+  // Google Drive Auth states
+  const [gDriveUser, setGDriveUser] = useState<User | null>(null);
+  const [gDriveToken, setGDriveToken] = useState<string | null>(null);
+  const [gDriveNeedsAuth, setGDriveNeedsAuth] = useState<boolean>(false);
+  const [isLoggingIn, setIsLoggingIn] = useState<boolean>(false);
+
+  // Initialize auth
+  useEffect(() => {
+    const unsubscribe = initAuth(
+      (user, token) => {
+        setGDriveUser(user);
+        setGDriveToken(token);
+        setGDriveNeedsAuth(false);
+      },
+      () => {
+        setGDriveUser(null);
+        setGDriveToken(null);
+        setGDriveNeedsAuth(true);
+      }
+    );
+    return () => {
+      if (unsubscribe) unsubscribe();
+    };
+  }, []);
+
+  const handleGoogleLogin = async () => {
+    setIsLoggingIn(true);
+    try {
+      const result = await googleSignIn();
+      if (result) {
+        setGDriveUser(result.user);
+        setGDriveToken(result.accessToken);
+        setGDriveNeedsAuth(false);
+      }
+    } catch (err) {
+      console.error('Sign in failed:', err);
+    } finally {
+      setIsLoggingIn(false);
+    }
+  };
+
+  const handleGoogleLogout = async () => {
+    try {
+      await googleSignOut();
+      setGDriveUser(null);
+      setGDriveToken(null);
+      setGDriveNeedsAuth(true);
+    } catch (err) {
+      console.error('Sign out failed:', err);
+    }
+  };
 
   // Google Sheets Sync Configuration States
   const [googleSheetId, setGoogleSheetId] = useState<string>(() => {
@@ -158,7 +215,24 @@ export default function App() {
     setGoogleSyncError(null);
     try {
       const targetId = customId || googleSheetId;
-      const data = await fetchGoogleSheetNilai(targetId);
+      
+      let data: SiswaNilai[] = [];
+      
+      // If we have an active Google token, pull using Google Sheets REST API directly (allows private sheet access!)
+      if (gDriveToken) {
+        try {
+          const rows = await fetchGoogleSheetValuesWithToken(gDriveToken, targetId, 'NILAI');
+          data = parseSheetValuesToNilai(rows);
+        } catch (authError: any) {
+          console.warn("REST API fetch failed, trying public CSV fallback:", authError);
+          // If the REST API fails (e.g. token expired or wrong scope), fallback to the public CSV fetch
+          data = await fetchGoogleSheetNilai(targetId);
+        }
+      } else {
+        // Fallback: public CSV export
+        data = await fetchGoogleSheetNilai(targetId);
+      }
+      
       if (data && data.length > 0) {
         setNilaiSiswa(data);
         const timeString = new Date().toLocaleString('id-ID', {
@@ -180,12 +254,38 @@ export default function App() {
   };
 
   // Handler: Pull/sync Jurnal Mengajar from Google Sheets
-  const handlePullJurnal = async (sheetId: string) => {
+  const handlePullJurnal = async (sheetId?: string) => {
     setJurnalSyncLoading(true);
     setJurnalSyncError(null);
     try {
-      const targetId = sheetId || googleSheetId;
-      const records = await fetchGoogleSheetJurnal(targetId);
+      let targetId = sheetId || googleSheetId;
+      
+      if (gDriveToken) {
+        try {
+          const foundId = await findSpreadsheetByName(gDriveToken, 'JURNAL MENGAJAR');
+          if (foundId) {
+            targetId = foundId;
+            setGoogleSheetId(foundId);
+          }
+        } catch (findErr) {
+          console.warn("Auto-find of JURNAL MENGAJAR spreadsheet by name failed:", findErr);
+        }
+      }
+
+      let records: JurnalMengajarHarian[] = [];
+      
+      if (gDriveToken) {
+        try {
+          const rows = await fetchGoogleSheetValuesWithToken(gDriveToken, targetId, 'JURNAL MENGAJAR');
+          records = parseSheetValuesToJurnal(rows);
+        } catch (authError: any) {
+          console.warn("REST API Jurnal fetch failed, trying public CSV fallback:", authError);
+          records = await fetchGoogleSheetJurnal(targetId);
+        }
+      } else {
+        records = await fetchGoogleSheetJurnal(targetId);
+      }
+      
       if (records && records.length > 0) {
         setJurnalHarian(records);
         const now = new Date();
@@ -238,6 +338,13 @@ export default function App() {
   useEffect(() => {
     handleRefreshFromGoogleSheets();
   }, []);
+
+  // Automatically pull Jurnal Mengajar when navigating to the Jurnal tab
+  useEffect(() => {
+    if (activeTab === 'supervisi-jurnal-kbm') {
+      handlePullJurnal().catch(() => {});
+    }
+  }, [activeTab, gDriveToken]);
 
   // Compute live notifications for the banner
   useEffect(() => {
@@ -537,14 +644,6 @@ export default function App() {
           />
         );
       case 'analisis-akademik':
-      case 'analisis-jurnal':
-        return (
-          <AnalisisJurnal 
-            jurnals={jurnals}
-            onAddJurnal={handleAddJurnal}
-            onDeleteJurnal={handleDeleteJurnal}
-          />
-        );
       case 'analisis-nilai':
         return (
           <AnalisisAkademik 
@@ -564,6 +663,8 @@ export default function App() {
             lastGoogleSyncTime={lastGoogleSyncTime}
             onRefreshFromGoogleSheets={handleRefreshFromGoogleSheets}
             onSyncToGoogleSheets={handleSyncToGoogleSheets}
+            gDriveToken={gDriveToken}
+            onLoginGDrive={handleGoogleLogin}
           />
         );
       case 'supervisi-guru':
@@ -590,6 +691,8 @@ export default function App() {
             syncLoading={jurnalSyncLoading}
             syncError={jurnalSyncError}
             lastSyncTime={lastJurnalSyncTime}
+            gDriveToken={gDriveToken}
+            onLoginGDrive={handleGoogleLogin}
           />
         );
       case 'dokumen-kurikulum':
@@ -599,6 +702,8 @@ export default function App() {
             onUploadDocument={handleUploadDocument}
             onAddRevisi={handleAddRevisi}
             onDeleteDocument={handleDeleteDocument}
+            gDriveToken={gDriveToken}
+            onLoginGDrive={handleGoogleLogin}
           />
         );
       default:
@@ -612,7 +717,6 @@ export default function App() {
       case 'dashboard': return 'Dashboard Utama';
       case 'program-kerja': return 'Manajemen Program Kerja';
       case 'analisis-akademik':
-      case 'analisis-jurnal': return 'Rekapitulasi Jurnal Mengajar';
       case 'analisis-nilai': return 'Analisis Nilai & Intervensi';
       case 'supervisi-guru':
       case 'supervisi-administrasi': return 'Administrasi Pembelajaran';
@@ -625,35 +729,93 @@ export default function App() {
   return (
     <div className="flex bg-slate-50 min-h-screen text-slate-800 font-sans" id="applet-viewport">
       {/* Sidebar Navigation */}
-      <Sidebar activeTab={activeTab} setActiveTab={setActiveTab} />
+      <Sidebar 
+        activeTab={activeTab} 
+        setActiveTab={setActiveTab} 
+        gDriveUser={gDriveUser}
+        gDriveToken={gDriveToken}
+        gDriveNeedsAuth={gDriveNeedsAuth}
+        isLoggingIn={isLoggingIn}
+        onLogin={handleGoogleLogin}
+        onLogout={handleGoogleLogout}
+      />
 
       {/* Main Command Center Stage */}
       <div className="flex-1 flex flex-col min-w-0" id="main-content-scroll-container">
         {/* Top Control Bar Header */}
         <header className="bg-white h-16 border-b border-slate-200/80 px-6 flex items-center justify-between sticky top-0 z-30 shadow-xs non-printable" id="top-bar-header">
-          <div className="flex items-center gap-2.5">
+          {/* Left: Title & Info Sekolah */}
+          <div className="flex flex-col md:flex-row md:items-center gap-1 md:gap-3">
             <h2 className="font-bold text-sm text-slate-800 tracking-wide uppercase">
               {getPageTitle()}
             </h2>
+            <div className="hidden sm:flex items-center gap-1 text-[10px] bg-slate-100 text-slate-500 px-2 py-0.5 rounded-full font-extrabold border border-slate-200/50">
+              <span>SIMUTU</span>
+              <span className="text-slate-300">•</span>
+              <span>SMP Negeri 2 Puriala</span>
+            </div>
           </div>
 
-          <div className="flex items-center gap-4 shrink-0">
-            {/* Live Clock / Calendar widget */}
-            <div className="flex items-center gap-1.5 text-xs text-slate-500 font-semibold bg-slate-100 rounded-lg px-3 py-1.5 border border-slate-200/40">
-              <Calendar className="h-3.5 w-3.5 text-indigo-500" />
-              <span>31 Agustus 2026 • Ganjil</span>
+          {/* Middle: Elegant Search Bar */}
+          <div className="hidden md:flex items-center gap-2 bg-slate-50 border border-slate-200/60 rounded-full px-3 py-1.5 w-48 lg:w-72 focus-within:ring-2 focus-within:ring-indigo-500/10 focus-within:border-indigo-500/40 transition-all">
+            <Search className="h-3.5 w-3.5 text-slate-400 shrink-0" />
+            <input 
+              type="text" 
+              placeholder="Cari data, jurnal, atau dokumen..." 
+              className="bg-transparent border-none text-[11px] focus:outline-hidden w-full text-slate-700 placeholder-slate-400 font-semibold"
+            />
+          </div>
+
+          {/* Right: Actions, Google Drive, and Profile Wakasek */}
+          <div className="flex items-center gap-3 shrink-0">
+            {/* Google Drive Status & Login */}
+            <div id="header-gdrive-status">
+              {gDriveUser ? (
+                <div className="flex items-center gap-2 bg-emerald-50 border border-emerald-200 rounded-full py-1 pl-2.5 pr-3 text-xs shadow-xs" title={`${gDriveUser.displayName || 'Akun Google'} Terhubung`}>
+                  {gDriveUser.photoURL ? (
+                    <img src={gDriveUser.photoURL} alt="Google Photo" className="h-5 w-5 rounded-full" referrerPolicy="no-referrer" />
+                  ) : (
+                    <div className="h-5 w-5 rounded-full bg-emerald-600 flex items-center justify-center text-[9px] text-white font-bold">GD</div>
+                  )}
+                  <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
+                  <span className="hidden lg:inline text-[10px] text-emerald-800 font-bold">Drive Terhubung</span>
+                  <button 
+                    onClick={handleGoogleLogout}
+                    className="ml-1 text-slate-400 hover:text-rose-500 transition-colors p-0.5 rounded-full hover:bg-slate-100 cursor-pointer"
+                    title="Putuskan Google Drive"
+                  >
+                    <LogOut className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+              ) : (
+                <button
+                  onClick={handleGoogleLogin}
+                  disabled={isLoggingIn}
+                  className="flex items-center gap-1.5 px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white text-[10px] font-bold rounded-full transition-all cursor-pointer disabled:opacity-50 shadow-xs"
+                  title="Hubungkan Google Drive"
+                >
+                  {isLoggingIn ? (
+                    <span className="animate-spin h-3 w-3 border-2 border-white border-t-transparent rounded-full"></span>
+                  ) : (
+                    <svg className="h-3 w-3" viewBox="0 0 24 24" fill="currentColor">
+                      <path d="M19.47 14.88L14.47 6.22C14.16 5.68 13.59 5.35 12.97 5.35H7L5 8.81L9.97 17.43C10.28 17.97 10.85 18.3 11.47 18.3H17.47L19.47 14.88ZM10.5 15.65L8 11.31H12.94L15.44 15.65H10.5Z" />
+                    </svg>
+                  )}
+                  <span>Hubungkan Drive</span>
+                </button>
+              )}
             </div>
 
             {/* Notification system */}
             <div className="relative">
               <button 
                 onClick={() => setIsNotifOpen(!isNotifOpen)}
-                className="relative bg-slate-100 hover:bg-slate-200 p-2 rounded-xl text-slate-600 transition-colors border border-slate-200/40 cursor-pointer"
+                className="relative bg-slate-50 hover:bg-slate-100 p-2 rounded-full text-slate-600 transition-colors border border-slate-200/50 cursor-pointer"
                 id="btn-bell-notifications"
               >
-                <Bell className="h-4.5 w-4.5" />
+                <Bell className="h-4 w-4" />
                 {notifications.length > 0 && (
-                  <span className="absolute -top-1 -right-1 h-4 w-4 bg-rose-500 text-white text-[9px] font-extrabold rounded-full flex items-center justify-center animate-pulse">
+                  <span className="absolute top-0 right-0 h-3.5 w-3.5 bg-rose-500 text-white text-[8px] font-extrabold rounded-full flex items-center justify-center animate-pulse">
                     {notifications.length}
                   </span>
                 )}
@@ -690,11 +852,22 @@ export default function App() {
             {/* Quick Helper Button */}
             <button 
               onClick={() => alert('SIMUTU SMP NEGERI 2 PURIALA - Gunakan panel navigasi kiri untuk mengakses berbagai Tupoksi Kurikulum Merdeka (Program Kerja, Rekap Nilai, Observasi Guru, dan Bank Dokumen KOSP). Semua data tersimpan aman secara offline pada peramban Anda.')}
-              className="bg-slate-100 hover:bg-slate-200 p-2 rounded-xl text-slate-500 transition-colors border border-slate-200/40 cursor-pointer"
+              className="bg-slate-50 hover:bg-slate-100 p-2 rounded-full text-slate-500 transition-colors border border-slate-200/50 cursor-pointer"
               title="Informasi Sistem"
             >
-              <HelpCircle className="h-4.5 w-4.5" />
+              <HelpCircle className="h-4 w-4" />
             </button>
+
+            {/* Profil Wakasek (Suherman, S.Pd.Gr) */}
+            <div className="flex items-center gap-2 border-l border-slate-200 pl-3 h-8" id="header-user-profile">
+              <div className="h-8 w-8 rounded-full bg-emerald-600 flex items-center justify-center text-white font-extrabold text-[11px] border border-emerald-500/20">
+                SH
+              </div>
+              <div className="hidden lg:block text-left">
+                <h4 className="text-xs font-bold text-slate-800 leading-none">Suherman, S.Pd.Gr</h4>
+                <p className="text-[9px] text-slate-400 font-bold mt-1 uppercase">Wakasek Kurikulum</p>
+              </div>
+            </div>
           </div>
         </header>
 

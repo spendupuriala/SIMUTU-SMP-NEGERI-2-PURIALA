@@ -16,22 +16,28 @@ import {
   CalendarDays,
   User,
   ExternalLink,
-  ChevronRight
+  ChevronRight,
+  CheckCircle
 } from 'lucide-react';
 import { DokumenKurikulum } from '../types';
+import { findOrCreateFolder, uploadFileToGoogleDrive } from '../lib/googleDriveApi';
 
 interface DokumenKurikulumProps {
   documents: DokumenKurikulum[];
   onUploadDocument: (doc: Omit<DokumenKurikulum, 'id'>) => void;
   onAddRevisi: (id: string, revisi: DokumenKurikulum['riwayatRevisi'][0]) => void;
   onDeleteDocument?: (id: string) => void;
+  gDriveToken?: string | null;
+  onLoginGDrive?: () => Promise<void>;
 }
 
 export default function DokumenKurikulumView({
   documents,
   onUploadDocument,
   onAddRevisi,
-  onDeleteDocument
+  onDeleteDocument,
+  gDriveToken,
+  onLoginGDrive
 }: DokumenKurikulumProps) {
   // Filters
   const [search, setSearch] = useState('');
@@ -41,6 +47,7 @@ export default function DokumenKurikulumView({
   const [isUploadOpen, setIsUploadOpen] = useState(false);
   const [selectedDocForRevisi, setSelectedDocForRevisi] = useState<DokumenKurikulum | null>(null);
   const [selectedDocTimeline, setSelectedDocTimeline] = useState<DokumenKurikulum | null>(null);
+  const [docToDelete, setDocToDelete] = useState<DokumenKurikulum | null>(null);
 
   // Form State - Upload Dokumen Baru
   const [formNamaFile, setFormNamaFile] = useState('');
@@ -50,6 +57,40 @@ export default function DokumenKurikulumView({
   const [formStatus, setFormStatus] = useState<DokumenKurikulum['status']>('Final');
   const [formSize, setFormSize] = useState('1.8 MB');
   const [formKeterangan, setFormKeterangan] = useState('');
+
+  // Google Drive File & State
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [isUploadingToDrive, setIsUploadingToDrive] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
+  const [localSuccessMsg, setLocalSuccessMsg] = useState<string | null>(null);
+
+  const formatBytes = (bytes: number, decimals = 1) => {
+    if (bytes === 0) return '0 Bytes';
+    const k = 1024;
+    const dm = decimals < 0 ? 0 : decimals;
+    const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(dm)) + ' ' + sizes[i];
+  };
+
+  const handleFileDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+      const file = e.dataTransfer.files[0];
+      setSelectedFile(file);
+      setFormNamaFile(file.name);
+      setFormSize(formatBytes(file.size));
+    }
+  };
+
+  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files.length > 0) {
+      const file = e.target.files[0];
+      setSelectedFile(file);
+      setFormNamaFile(file.name);
+      setFormSize(formatBytes(file.size));
+    }
+  };
 
   // Form State - Catatan Revisi Baru
   const [formVersi, setFormVersi] = useState('');
@@ -74,40 +115,81 @@ export default function DokumenKurikulumView({
     return matchesKategori && matchesSearch;
   });
 
-  // Submit Upload Document
-  const handleUploadSubmit = (e: React.FormEvent) => {
+  // Submit Upload Document with Drive Integration
+  const handleUploadSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!formNamaFile || !formPembuat) return;
 
-    // Standardize file suffix if not entered
-    let cleanedFileName = formNamaFile;
-    if (!cleanedFileName.endsWith('.pdf') && !cleanedFileName.endsWith('.docx') && !cleanedFileName.endsWith('.xlsx')) {
-      cleanedFileName += '.pdf';
-    }
+    setIsUploadingToDrive(true);
+    setUploadError(null);
+    setLocalSuccessMsg(null);
 
-    const initRevKet = formKeterangan || 'Inisiasi berkas kurikulum baru.';
-    onUploadDocument({
-      namaFile: cleanedFileName,
-      kategori: formKategori,
-      tahunAjaran: formTahun,
-      status: formStatus,
-      tanggalDibuat: new Date().toISOString().split('T')[0],
-      pembuat: formPembuat,
-      ukuran: formSize,
-      riwayatRevisi: [
-        {
-          versi: 'v1.0',
-          tanggal: new Date().toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' }),
-          oleh: formPembuat,
-          keterangan: initRevKet
+    try {
+      let cleanedFileName = formNamaFile;
+      if (!cleanedFileName.endsWith('.pdf') && !cleanedFileName.endsWith('.docx') && !cleanedFileName.endsWith('.xlsx')) {
+        cleanedFileName += '.pdf';
+      }
+
+      const initRevKet = formKeterangan || 'Inisiasi berkas kurikulum baru.';
+      let isUploadedToDrive = false;
+
+      if (selectedFile) {
+        if (gDriveToken) {
+          try {
+            const folderId = await findOrCreateFolder(gDriveToken, 'KURIKULUM');
+            const result = await uploadFileToGoogleDrive(gDriveToken, selectedFile, folderId);
+            if (result) {
+              isUploadedToDrive = true;
+            } else {
+              throw new Error('Gagal menyimpan file ke Google Drive.');
+            }
+          } catch (err: any) {
+            console.error('Google Drive Upload error (falling back to local):', err);
+            // Fallback: Notify user it's saved locally and will be synced later
+            setLocalSuccessMsg("Dokumen berhasil disimpan secara lokal (Akan disinkronkan ke Drive saat terhubung)");
+          }
+        } else {
+          // No Google Drive Token: Inform user about local saving fallback
+          setLocalSuccessMsg("Dokumen berhasil disimpan secara lokal (Akan disinkronkan ke Drive saat terhubung)");
         }
-      ]
-    });
+      } else {
+        // Form submitted without a file binary (manually inputted name)
+        setLocalSuccessMsg("Dokumen berhasil disimpan secara lokal");
+      }
 
-    // Reset Form
-    setFormNamaFile('');
-    setFormKeterangan('');
-    setIsUploadOpen(false);
+      onUploadDocument({
+        namaFile: cleanedFileName,
+        kategori: formKategori,
+        tahunAjaran: formTahun,
+        status: formStatus,
+        tanggalDibuat: new Date().toISOString().split('T')[0],
+        pembuat: formPembuat,
+        ukuran: formSize,
+        riwayatRevisi: [
+          {
+            versi: 'v1.0',
+            tanggal: new Date().toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' }),
+            oleh: formPembuat,
+            keterangan: initRevKet
+          }
+        ]
+      });
+
+      if (isUploadedToDrive) {
+        setLocalSuccessMsg("Dokumen berhasil diunggah langsung ke folder KURIKULUM Google Drive.");
+      }
+
+      // Reset Form
+      setFormNamaFile('');
+      setFormKeterangan('');
+      setSelectedFile(null);
+      setUploadError(null);
+      setIsUploadOpen(false);
+    } catch (err: any) {
+      setUploadError(err.message || 'Gagal mengunggah berkas.');
+    } finally {
+      setIsUploadingToDrive(false);
+    }
   };
 
   // Submit Revision Log
@@ -152,6 +234,26 @@ export default function DokumenKurikulumView({
           Unggah Dokumen KOSP
         </button>
       </div>
+
+      {localSuccessMsg && (
+        <div className="bg-emerald-50 border border-emerald-200 text-emerald-800 p-4 rounded-xl text-xs flex items-center justify-between shadow-xs transition-all animate-fade-in" id="local-upload-success-banner">
+          <div className="flex items-center gap-3">
+            <div className="bg-emerald-100 p-1.5 rounded-full text-emerald-600">
+              <CheckCircle className="h-4 w-4" />
+            </div>
+            <div>
+              <span className="font-bold block text-emerald-900">Sukses Menyimpan Dokumen</span>
+              <p className="text-[10px] text-emerald-700 mt-0.5">{localSuccessMsg}</p>
+            </div>
+          </div>
+          <button 
+            onClick={() => setLocalSuccessMsg(null)}
+            className="text-emerald-500 hover:text-emerald-700 text-xs font-bold px-2 py-1 cursor-pointer transition-colors"
+          >
+            Tutup
+          </button>
+        </div>
+      )}
 
       {/* SEARCH AND FILTERS PANEL */}
       <div className="grid grid-cols-1 md:grid-cols-12 gap-4 items-center bg-white p-4 rounded-xl border border-slate-200/60" id="dokumen-filters-bar">
@@ -227,12 +329,8 @@ export default function DokumenKurikulumView({
 
                     {onDeleteDocument && (
                       <button 
-                        onClick={() => {
-                          if (confirm(`Yakin ingin menghapus berkas ${doc.namaFile}?`)) {
-                            onDeleteDocument(doc.id);
-                          }
-                        }}
-                        className="p-1 text-slate-400 hover:text-rose-600 rounded hover:bg-slate-50 transition-colors"
+                        onClick={() => setDocToDelete(doc)}
+                        className="p-1 text-slate-400 hover:text-rose-600 rounded hover:bg-slate-50 transition-colors cursor-pointer"
                         title="Hapus Dokumen"
                       >
                         <Trash2 className="h-3.5 w-3.5" />
@@ -448,6 +546,7 @@ export default function DokumenKurikulumView({
                 <h3 className="font-bold text-sm text-slate-800">Unggah Dokumen Baru ke Bank Data</h3>
               </div>
               <button 
+                type="button"
                 onClick={() => setIsUploadOpen(false)}
                 className="p-1 hover:bg-slate-200 rounded-full text-slate-400 hover:text-slate-600 transition-colors"
               >
@@ -456,6 +555,71 @@ export default function DokumenKurikulumView({
             </div>
 
             <form onSubmit={handleUploadSubmit} className="p-5 space-y-4">
+              
+              {/* Google Drive Status & Connection */}
+              <div className="bg-slate-50 border border-slate-200 rounded-xl p-3 flex items-center justify-between text-xs">
+                <div className="space-y-0.5">
+                  <span className="font-bold text-slate-700 block">Status Google Drive</span>
+                  <p className="text-[10px] text-slate-400">
+                    {gDriveToken 
+                      ? 'Terhubung. Berkas otomatis disimpan ke folder KURIKULUM' 
+                      : 'Belum terhubung. Berkas disimpan ke daftar lokal.'}
+                  </p>
+                </div>
+                {!gDriveToken && onLoginGDrive && (
+                  <button
+                    type="button"
+                    onClick={onLoginGDrive}
+                    className="px-2 py-1 bg-indigo-600 hover:bg-indigo-700 text-white text-[10px] font-bold rounded-lg transition-colors cursor-pointer"
+                  >
+                    Hubungkan Drive
+                  </button>
+                )}
+              </div>
+
+              {/* Drag & Drop File Upload Area */}
+              <div className="space-y-1">
+                <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Pilih File / Tarik Berkas</label>
+                <div 
+                  onDragOver={(e) => e.preventDefault()}
+                  onDrop={handleFileDrop}
+                  className="border-2 border-dashed border-slate-200 hover:border-indigo-400 rounded-xl p-4 text-center cursor-pointer hover:bg-slate-50/50 transition-all space-y-1 relative"
+                >
+                  <input 
+                    type="file" 
+                    id="file-upload-input" 
+                    className="hidden" 
+                    onChange={handleFileSelect} 
+                    accept=".pdf,.doc,.docx,.xls,.xlsx"
+                  />
+                  <label htmlFor="file-upload-input" className="cursor-pointer block">
+                    <Upload className="h-6 w-6 text-slate-400 mx-auto mb-1" />
+                    <p className="text-xs font-bold text-slate-700">Pilih Berkas Komputer</p>
+                    <p className="text-[10px] text-slate-400">atau tarik dan letakkan berkas PDF, Word, atau Excel ke area ini</p>
+                  </label>
+                  {selectedFile && (
+                    <div className="bg-indigo-50 border border-indigo-100 rounded-lg p-2.5 text-left text-[10px] mt-2 flex items-center justify-between">
+                      <span className="font-bold truncate max-w-[80%] text-indigo-800">{selectedFile.name} ({formatBytes(selectedFile.size)})</span>
+                      <button 
+                        type="button" 
+                        onClick={() => setSelectedFile(null)}
+                        className="text-indigo-600 hover:text-rose-600 font-bold"
+                      >
+                        Hapus
+                      </button>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Error Message banner */}
+              {uploadError && (
+                <div className="bg-rose-50 border border-rose-100 text-rose-700 p-3 rounded-xl text-xs flex items-start gap-2">
+                  <AlertCircle className="h-4 w-4 mt-0.5 shrink-0" />
+                  <p className="font-medium leading-relaxed">{uploadError}</p>
+                </div>
+              )}
+
               <div className="space-y-1">
                 <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Nama File Dokumen</label>
                 <input 
@@ -547,18 +711,56 @@ export default function DokumenKurikulumView({
                 <button 
                   type="button"
                   onClick={() => setIsUploadOpen(false)}
-                  className="px-4 py-2 hover:bg-slate-100 text-slate-500 text-xs font-bold rounded-xl border border-slate-200 transition-colors"
+                  className="px-4 py-2 hover:bg-slate-100 text-slate-500 text-xs font-bold rounded-xl border border-slate-200 transition-colors cursor-pointer"
                 >
                   Batal
                 </button>
                 <button 
                   type="submit"
-                  className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-xl shadow-md shadow-emerald-600/10 transition-all"
+                  disabled={isUploadingToDrive}
+                  className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 disabled:bg-emerald-400 text-white text-xs font-bold rounded-xl shadow-md shadow-emerald-600/10 transition-all flex items-center gap-1.5 cursor-pointer"
                 >
-                  Unggah Dokumen
+                  {isUploadingToDrive && <span className="animate-spin h-3.5 w-3.5 border-2 border-white border-t-transparent rounded-full mr-1 animate-infinite"></span>}
+                  {isUploadingToDrive ? 'Sedang Mengunggah Berkas ke Drive...' : 'Unggah Dokumen'}
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* CUSTOM CONFIRM DELETE MODAL */}
+      {docToDelete && (
+        <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-900/50 backdrop-blur-xs flex justify-center items-center p-4" id="confirm-delete-modal">
+          <div className="bg-white rounded-2xl shadow-xl max-w-sm w-full overflow-hidden border border-slate-200 p-6 space-y-4">
+            <div className="flex items-center gap-3 text-rose-600">
+              <AlertCircle className="h-6 w-6" />
+              <h3 className="font-bold text-sm text-slate-800">Konfirmasi Hapus</h3>
+            </div>
+            <p className="text-xs text-slate-600 leading-relaxed">
+              Apakah Anda yakin ingin menghapus berkas <span className="font-bold text-slate-800 break-all">"{docToDelete.namaFile}"</span> ini dari arsip? Tindakan ini tidak dapat dibatalkan.
+            </p>
+            <div className="flex items-center justify-end gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setDocToDelete(null)}
+                className="px-3 py-1.5 hover:bg-slate-100 text-slate-500 text-xs font-bold rounded-xl border border-slate-200 transition-colors cursor-pointer"
+              >
+                Batal
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  if (onDeleteDocument) {
+                    onDeleteDocument(docToDelete.id);
+                  }
+                  setDocToDelete(null);
+                }}
+                className="px-3 py-1.5 bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold rounded-xl transition-all shadow-xs cursor-pointer"
+              >
+                Hapus Berkas
+              </button>
+            </div>
           </div>
         </div>
       )}

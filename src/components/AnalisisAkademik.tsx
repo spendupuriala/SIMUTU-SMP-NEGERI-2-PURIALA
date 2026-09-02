@@ -28,6 +28,8 @@ import {
 import { SiswaNilai, IntervensiSiswa } from '../types';
 import { generateAppsScriptCode } from '../lib/googleSheetSync';
 
+import GoogleDrivePicker from './GoogleDrivePicker';
+
 interface AnalisisAkademikProps {
   nilaiSiswa: SiswaNilai[];
   intervensi: IntervensiSiswa[];
@@ -47,6 +49,10 @@ interface AnalisisAkademikProps {
   lastGoogleSyncTime?: string | null;
   onRefreshFromGoogleSheets?: (customId?: string) => Promise<void>;
   onSyncToGoogleSheets?: (webhookUrl?: string, customRecords?: SiswaNilai[]) => Promise<boolean | true>;
+
+  // Google Drive token & connection
+  gDriveToken?: string | null;
+  onLoginGDrive?: () => void;
 }
 
 export default function AnalisisAkademik({
@@ -65,7 +71,9 @@ export default function AnalisisAkademik({
   googleSyncError = null,
   lastGoogleSyncTime = null,
   onRefreshFromGoogleSheets,
-  onSyncToGoogleSheets
+  onSyncToGoogleSheets,
+  gDriveToken = null,
+  onLoginGDrive
 }: AnalisisAkademikProps) {
   // Navigation internal tabs
   const [activeSubTab, setActiveSubTab] = useState<'rekap' | 'peta' | 'intervensi'>('rekap');
@@ -78,6 +86,7 @@ export default function AnalisisAkademik({
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [pushStatus, setPushStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
   const [pushMessage, setPushMessage] = useState('');
+  const [isDrivePickerOpen, setIsDrivePickerOpen] = useState(false);
 
   // Sync temp state with prop updates
   useEffect(() => {
@@ -1344,7 +1353,29 @@ export default function AnalisisAkademik({
               {/* Form inputs */}
               <div className="space-y-4">
                 <div className="space-y-1">
-                  <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block">ID Spreadsheet Google Sheets</label>
+                  <div className="flex items-center justify-between">
+                    <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block">ID Spreadsheet Google Sheets</label>
+                    {gDriveToken ? (
+                      <button
+                        type="button"
+                        onClick={() => setIsDrivePickerOpen(true)}
+                        className="text-[10px] text-indigo-600 hover:text-indigo-500 font-bold flex items-center gap-1 cursor-pointer bg-transparent border-none p-0"
+                      >
+                        <FileSpreadsheet className="h-3.5 w-3.5" />
+                        Pilih dari Google Drive
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={onLoginGDrive}
+                        className="text-[10px] text-slate-500 hover:text-slate-700 font-bold flex items-center gap-1 cursor-pointer bg-transparent border-none p-0"
+                        title="Hubungkan akun Google Drive Anda"
+                      >
+                        <FileSpreadsheet className="h-3.5 w-3.5 opacity-60" />
+                        Hubungkan Google Drive
+                      </button>
+                    )}
+                  </div>
                   <input 
                     type="text" 
                     placeholder="Masukkan ID Spreadsheet..."
@@ -1451,6 +1482,21 @@ export default function AnalisisAkademik({
             </div>
           </div>
         </div>
+      )}
+
+      {/* Google Drive Picker Modal */}
+      {isDrivePickerOpen && gDriveToken && (
+        <GoogleDrivePicker
+          token={gDriveToken}
+          onSelect={(id, name) => {
+            setTempSheetId(id);
+            if (setGoogleSheetId) setGoogleSheetId(id);
+            setIsDrivePickerOpen(false);
+            // Automatically refresh data with the newly chosen sheet
+            onRefreshFromGoogleSheets?.(id);
+          }}
+          onClose={() => setIsDrivePickerOpen(false)}
+        />
       )}
 
     </div>

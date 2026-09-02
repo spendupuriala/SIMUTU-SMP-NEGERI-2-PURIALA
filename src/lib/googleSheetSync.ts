@@ -51,7 +51,8 @@ export function parseCSVToNilai(csvText: string): SiswaNilai[] {
     // 5. Ambil Kelas dari Kolom H (index 7, fallback to 5 or 'VII.A')
     const rawNamaSiswa = cells[1] || '';
     const mapelValue = cells[2] || 'Matematika';
-    const jpType = (cells[3] || '').toLowerCase().trim();
+    const rawJpType = (cells[3] || '').trim();
+    const jpTypeLower = rawJpType.toLowerCase();
     const nilaiValue = parseFloat(cells[4]) || 0;
     const kelasValue = cells[7] || cells[5] || 'VII.A';
 
@@ -61,6 +62,7 @@ export function parseCSVToNilai(csvText: string): SiswaNilai[] {
     const groupKey = `${rawNamaSiswa}||${mapelValue}`.toLowerCase();
 
     if (!tempGroup[groupKey]) {
+      // Format Data Awal (Reset State): Ensure all columns are explicitly initialized to 0
       tempGroup[groupKey] = {
         id: `sn-gsheet-${rawNamaSiswa.replace(/\s+/g, '')}-${mapelValue.replace(/\s+/g, '')}`,
         nisn: '0000000000',
@@ -92,44 +94,41 @@ export function parseCSVToNilai(csvText: string): SiswaNilai[] {
 
     const groupObj = tempGroup[groupKey];
 
-    // Logika Pemetaan ke Kolom Leger Aplikasi:
-    // - Jika Kolom D bernilai "Tugas 1" atau "T1" - Masukkan nilainya ke kolom T1.
-    // - Jika Kolom D bernilai "Tugas 2" atau "T2" - Masukkan nilainya ke kolom T2 (dan seterusnya hingga T10).
-    // - Jika Kolom D bernilai "UH1" hingga "UH5" - Masukkan ke kolom UH1 - UH5 yang sesuai.
-    // - Jika Kolom D bernilai "UTS" atau "UAS" - Masukkan ke kolom UTS / UAS.
-    if (jpType === 'tugas 1' || jpType === 't1' || jpType === 'tugas1') {
+    // Logika Pemetaan ke Kolom Leger Aplikasi dengan Pencocokan Teks Presisi (Exact Text Matching)
+    // Tanpa penimpaan mendatar (No Duplicate/Fallback Spread)
+    if (rawJpType === 'Tugas 1' || jpTypeLower === 't1' || jpTypeLower === 'tugas 1' || jpTypeLower === 'tugas1') {
       groupObj.tugas1 = nilaiValue;
-    } else if (jpType === 'tugas 2' || jpType === 't2' || jpType === 'tugas2') {
+    } else if (rawJpType === 'Tugas 2' || jpTypeLower === 't2' || jpTypeLower === 'tugas 2' || jpTypeLower === 'tugas2') {
       groupObj.tugas2 = nilaiValue;
-    } else if (jpType === 'tugas 3' || jpType === 't3' || jpType === 'tugas3') {
+    } else if (rawJpType === 'Tugas 3' || jpTypeLower === 't3' || jpTypeLower === 'tugas 3' || jpTypeLower === 'tugas3') {
       groupObj.tugas3 = nilaiValue;
-    } else if (jpType === 'tugas 4' || jpType === 't4' || jpType === 'tugas4') {
+    } else if (rawJpType === 'Tugas 4' || jpTypeLower === 't4' || jpTypeLower === 'tugas 4' || jpTypeLower === 'tugas4') {
       groupObj.tugas4 = nilaiValue;
-    } else if (jpType === 'tugas 5' || jpType === 't5' || jpType === 'tugas5') {
+    } else if (rawJpType === 'Tugas 5' || jpTypeLower === 't5' || jpTypeLower === 'tugas 5' || jpTypeLower === 'tugas5') {
       groupObj.tugas5 = nilaiValue;
-    } else if (jpType === 'tugas 6' || jpType === 't6' || jpType === 'tugas6') {
+    } else if (rawJpType === 'Tugas 6' || jpTypeLower === 't6' || jpTypeLower === 'tugas 6' || jpTypeLower === 'tugas6') {
       groupObj.tugas6 = nilaiValue;
-    } else if (jpType === 'tugas 7' || jpType === 't7' || jpType === 'tugas7') {
+    } else if (rawJpType === 'Tugas 7' || jpTypeLower === 't7' || jpTypeLower === 'tugas 7' || jpTypeLower === 'tugas7') {
       groupObj.tugas7 = nilaiValue;
-    } else if (jpType === 'tugas 8' || jpType === 't8' || jpType === 'tugas8') {
+    } else if (rawJpType === 'Tugas 8' || jpTypeLower === 't8' || jpTypeLower === 'tugas 8' || jpTypeLower === 'tugas8') {
       groupObj.tugas8 = nilaiValue;
-    } else if (jpType === 'tugas 9' || jpType === 't9' || jpType === 'tugas9') {
+    } else if (rawJpType === 'Tugas 9' || jpTypeLower === 't9' || jpTypeLower === 'tugas 9' || jpTypeLower === 'tugas9') {
       groupObj.tugas9 = nilaiValue;
-    } else if (jpType === 'tugas 10' || jpType === 't10' || jpType === 'tugas10') {
+    } else if (rawJpType === 'Tugas 10' || jpTypeLower === 't10' || jpTypeLower === 'tugas 10' || jpTypeLower === 'tugas10') {
       groupObj.tugas10 = nilaiValue;
-    } else if (jpType === 'uh1' || jpType === 'uh 1') {
+    } else if (rawJpType === 'UH1' || jpTypeLower === 'uh1' || jpTypeLower === 'uh 1') {
       groupObj.uh1 = nilaiValue;
-    } else if (jpType === 'uh2' || jpType === 'uh 2') {
+    } else if (rawJpType === 'UH2' || jpTypeLower === 'uh2' || jpTypeLower === 'uh 2') {
       groupObj.uh2 = nilaiValue;
-    } else if (jpType === 'uh3' || jpType === 'uh 3') {
+    } else if (rawJpType === 'UH3' || jpTypeLower === 'uh3' || jpTypeLower === 'uh 3') {
       groupObj.uh3 = nilaiValue;
-    } else if (jpType === 'uh4' || jpType === 'uh 4') {
+    } else if (rawJpType === 'UH4' || jpTypeLower === 'uh4' || jpTypeLower === 'uh 4') {
       groupObj.uh4 = nilaiValue;
-    } else if (jpType === 'uh5' || jpType === 'uh 5') {
+    } else if (rawJpType === 'UH5' || jpTypeLower === 'uh5' || jpTypeLower === 'uh 5') {
       groupObj.uh5 = nilaiValue;
-    } else if (jpType === 'uts') {
+    } else if (rawJpType === 'UTS' || jpTypeLower === 'uts') {
       groupObj.uts = nilaiValue;
-    } else if (jpType === 'uas') {
+    } else if (rawJpType === 'UAS' || jpTypeLower === 'uas') {
       groupObj.uas = nilaiValue;
     }
   }

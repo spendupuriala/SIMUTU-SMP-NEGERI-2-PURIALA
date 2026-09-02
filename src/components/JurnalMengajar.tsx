@@ -17,16 +17,19 @@ import {
   Info,
   X
 } from 'lucide-react';
+import GoogleDrivePicker from './GoogleDrivePicker';
 import { JurnalMengajarHarian } from '../types';
 
 interface JurnalMengajarProps {
   jurnalHarian: JurnalMengajarHarian[];
-  onPullJurnal: (sheetId: string) => Promise<void>;
+  onPullJurnal: (sheetId?: string) => Promise<void>;
   googleSheetId: string;
   setGoogleSheetId: (id: string) => void;
   syncLoading: boolean;
   syncError: string | null;
   lastSyncTime: Date | null;
+  gDriveToken?: string | null;
+  onLoginGDrive?: () => void;
 }
 
 export default function JurnalMengajarView({
@@ -36,15 +39,24 @@ export default function JurnalMengajarView({
   setGoogleSheetId,
   syncLoading,
   syncError,
-  lastSyncTime
+  lastSyncTime,
+  gDriveToken = null,
+  onLoginGDrive
 }: JurnalMengajarProps) {
   // Search and Filter state
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedHari, setSelectedHari] = useState('Semua');
   const [selectedKelas, setSelectedKelas] = useState('Semua');
+  const [selectedGuru, setSelectedGuru] = useState('Semua');
   const [selectedStatus, setSelectedStatus] = useState('Semua');
   const [localSheetId, setLocalSheetId] = useState(googleSheetId);
   const [showConfig, setShowConfig] = useState(false);
+  const [isDrivePickerOpen, setIsDrivePickerOpen] = useState(false);
+
+  // Keep local sheet ID in sync with prop updates from auto-detection
+  React.useEffect(() => {
+    setLocalSheetId(googleSheetId);
+  }, [googleSheetId]);
 
   // Photo viewer modal state
   const [activePhoto, setActivePhoto] = useState<{ url: string; title: string } | null>(null);
@@ -59,7 +71,7 @@ export default function JurnalMengajarView({
   // Sync / Pull Handler
   const handlePullData = async () => {
     try {
-      await onPullJurnal(localSheetId);
+      await onPullJurnal();
     } catch (err) {
       console.error(err);
     }
@@ -70,6 +82,14 @@ export default function JurnalMengajarView({
     const set = new Set<string>();
     jurnalHarian.forEach(j => {
       if (j.kelas) set.add(j.kelas);
+    });
+    return ['Semua', ...Array.from(set).sort()];
+  }, [jurnalHarian]);
+
+  const teachersList = useMemo(() => {
+    const set = new Set<string>();
+    jurnalHarian.forEach(j => {
+      if (j.namaGuru) set.add(j.namaGuru);
     });
     return ['Semua', ...Array.from(set).sort()];
   }, [jurnalHarian]);
@@ -87,6 +107,7 @@ export default function JurnalMengajarView({
       
       const matchesHari = selectedHari === 'Semua' || item.hari.toLowerCase() === selectedHari.toLowerCase();
       const matchesKelas = selectedKelas === 'Semua' || item.kelas === selectedKelas;
+      const matchesGuru = selectedGuru === 'Semua' || item.namaGuru === selectedGuru;
       
       let matchesStatus = true;
       if (selectedStatus !== 'Semua') {
@@ -98,9 +119,9 @@ export default function JurnalMengajarView({
         }
       }
 
-      return matchesSearch && matchesHari && matchesKelas && matchesStatus;
+      return matchesSearch && matchesHari && matchesKelas && matchesGuru && matchesStatus;
     });
-  }, [jurnalHarian, searchTerm, selectedHari, selectedKelas, selectedStatus]);
+  }, [jurnalHarian, searchTerm, selectedHari, selectedKelas, selectedGuru, selectedStatus]);
 
   // Statistics calculation
   const stats = useMemo(() => {
@@ -200,7 +221,29 @@ export default function JurnalMengajarView({
 
           <form onSubmit={handleSaveConfig} className="flex gap-3 items-end">
             <div className="flex-1 space-y-1.5">
-              <label className="text-[11px] font-bold text-slate-600 block">Spreadsheet ID Google Sheets</label>
+              <div className="flex items-center justify-between">
+                <label className="text-[11px] font-bold text-slate-600 block">Spreadsheet ID Google Sheets</label>
+                {gDriveToken ? (
+                  <button
+                    type="button"
+                    onClick={() => setIsDrivePickerOpen(true)}
+                    className="text-[10px] text-indigo-600 hover:text-indigo-500 font-bold flex items-center gap-1 cursor-pointer bg-transparent border-none p-0"
+                  >
+                    <FileSpreadsheet className="h-3.5 w-3.5" />
+                    Pilih dari Google Drive
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={onLoginGDrive}
+                    className="text-[10px] text-slate-500 hover:text-slate-700 font-bold flex items-center gap-1 cursor-pointer bg-transparent border-none p-0"
+                    title="Hubungkan akun Google Drive Anda"
+                  >
+                    <FileSpreadsheet className="h-3.5 w-3.5 opacity-60" />
+                    Hubungkan Google Drive
+                  </button>
+                )}
+              </div>
               <input
                 type="text"
                 value={localSheetId}
@@ -295,26 +338,26 @@ export default function JurnalMengajarView({
           <h3 className="text-xs font-bold text-slate-700 uppercase tracking-wide">Pencarian & Penyaringan</h3>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
           {/* Keyword Search */}
           <div className="relative">
-            <Search className="absolute left-3.5 top-2.5 h-4 w-4 text-slate-400" />
+            <Search className="absolute left-3 top-2.5 h-3.5 w-3.5 text-slate-400" />
             <input
               type="text"
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              placeholder="Cari guru, mata pelajaran, topik..."
-              className="w-full text-xs bg-slate-50 border border-slate-200 rounded-xl pl-10 pr-4 py-2.5 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 font-medium text-slate-700 placeholder-slate-400"
+              placeholder="Cari kata kunci..."
+              className="w-full text-[11px] bg-slate-50 border border-slate-200 rounded-xl pl-9 pr-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 font-semibold text-slate-700 placeholder-slate-400"
             />
           </div>
 
           {/* Filter Hari */}
-          <div className="flex items-center gap-2 bg-slate-50 border border-slate-200 rounded-xl px-3 py-1">
-            <span className="text-[10px] font-bold text-slate-400 uppercase shrink-0">Hari</span>
+          <div className="flex items-center gap-2 bg-slate-50 border border-slate-200 rounded-xl px-2.5 py-0.5">
+            <span className="text-[9px] font-bold text-slate-400 uppercase shrink-0">Hari</span>
             <select
               value={selectedHari}
               onChange={(e) => setSelectedHari(e.target.value)}
-              className="w-full bg-transparent text-xs font-semibold text-slate-700 outline-none py-1.5 cursor-pointer"
+              className="w-full bg-transparent text-[11px] font-bold text-slate-700 outline-none py-1.5 cursor-pointer"
             >
               {hariList.map(h => (
                 <option key={h} value={h}>{h}</option>
@@ -323,12 +366,12 @@ export default function JurnalMengajarView({
           </div>
 
           {/* Filter Kelas */}
-          <div className="flex items-center gap-2 bg-slate-50 border border-slate-200 rounded-xl px-3 py-1">
-            <span className="text-[10px] font-bold text-slate-400 uppercase shrink-0">Kelas</span>
+          <div className="flex items-center gap-2 bg-slate-50 border border-slate-200 rounded-xl px-2.5 py-0.5">
+            <span className="text-[9px] font-bold text-slate-400 uppercase shrink-0">Kelas</span>
             <select
               value={selectedKelas}
               onChange={(e) => setSelectedKelas(e.target.value)}
-              className="w-full bg-transparent text-xs font-semibold text-slate-700 outline-none py-1.5 cursor-pointer"
+              className="w-full bg-transparent text-[11px] font-bold text-slate-700 outline-none py-1.5 cursor-pointer"
             >
               {classesList.map(k => (
                 <option key={k} value={k}>{k}</option>
@@ -336,13 +379,27 @@ export default function JurnalMengajarView({
             </select>
           </div>
 
+          {/* Filter Guru */}
+          <div className="flex items-center gap-2 bg-slate-50 border border-slate-200 rounded-xl px-2.5 py-0.5">
+            <span className="text-[9px] font-bold text-slate-400 uppercase shrink-0">Guru</span>
+            <select
+              value={selectedGuru}
+              onChange={(e) => setSelectedGuru(e.target.value)}
+              className="w-full bg-transparent text-[11px] font-bold text-slate-700 outline-none py-1.5 cursor-pointer"
+            >
+              {teachersList.map(t => (
+                <option key={t} value={t}>{t}</option>
+              ))}
+            </select>
+          </div>
+
           {/* Filter Status Keterangan */}
-          <div className="flex items-center gap-2 bg-slate-50 border border-slate-200 rounded-xl px-3 py-1">
-            <span className="text-[10px] font-bold text-slate-400 uppercase shrink-0">Keterangan</span>
+          <div className="flex items-center gap-2 bg-slate-50 border border-slate-200 rounded-xl px-2.5 py-0.5">
+            <span className="text-[9px] font-bold text-slate-400 uppercase shrink-0">Status</span>
             <select
               value={selectedStatus}
               onChange={(e) => setSelectedStatus(e.target.value)}
-              className="w-full bg-transparent text-xs font-semibold text-slate-700 outline-none py-1.5 cursor-pointer"
+              className="w-full bg-transparent text-[11px] font-bold text-slate-700 outline-none py-1.5 cursor-pointer"
             >
               <option value="Semua">Semua Status</option>
               <option value="TEPAT WAKTU">TEPAT WAKTU</option>
@@ -512,6 +569,21 @@ export default function JurnalMengajarView({
             </div>
           </div>
         </div>
+      )}
+
+      {/* Google Drive Picker Modal */}
+      {isDrivePickerOpen && gDriveToken && (
+        <GoogleDrivePicker
+          token={gDriveToken}
+          onSelect={(id, name) => {
+            setLocalSheetId(id);
+            setGoogleSheetId(id);
+            setIsDrivePickerOpen(false);
+            // Automatically refresh data
+            onPullJurnal(id);
+          }}
+          onClose={() => setIsDrivePickerOpen(false)}
+        />
       )}
     </div>
   );
