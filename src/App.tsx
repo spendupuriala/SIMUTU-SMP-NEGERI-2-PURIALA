@@ -51,7 +51,7 @@ export default function App() {
   const [activeTab, setActiveTab] = useState<string>('dashboard');
 
   // Google Drive Auth states
-  const [gDriveUser, setGDriveUser] = useState<User | null>(null);
+  const [gDriveUser, setGDriveUser] = useState<any | null>(null);
   const [gDriveToken, setGDriveToken] = useState<string | null>(null);
   const [gDriveNeedsAuth, setGDriveNeedsAuth] = useState<boolean>(false);
   const [isLoggingIn, setIsLoggingIn] = useState<boolean>(false);

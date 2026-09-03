@@ -1,16 +1,10 @@
 import { initializeApp, getApps, getApp } from 'firebase/app';
-import { getAuth, signInWithPopup, GoogleAuthProvider, onAuthStateChanged, User } from 'firebase/auth';
+import { getAuth } from 'firebase/auth';
 import firebaseConfig from '../../firebase-applet-config.json';
 
 // Initialize Firebase App
 const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
 export const auth = getAuth(app);
-
-const provider = new GoogleAuthProvider();
-// Request Google Drive Read/Write scopes
-provider.addScope('https://www.googleapis.com/auth/drive.readonly');
-provider.addScope('https://www.googleapis.com/auth/drive.file');
-provider.addScope('https://www.googleapis.com/auth/drive');
 
 let isSigningIn = false;
 let cachedAccessToken: string | null = (() => {
@@ -23,49 +17,145 @@ let cachedAccessToken: string | null = (() => {
 
 // Initialize auth state listener
 export const initAuth = (
-  onAuthSuccess?: (user: User, token: string) => void,
+  onAuthSuccess?: (user: any, token: string) => void,
   onAuthFailure?: () => void
 ) => {
-  return onAuthStateChanged(auth, async (user: User | null) => {
-    if (user) {
-      if (cachedAccessToken) {
-        if (onAuthSuccess) onAuthSuccess(user, cachedAccessToken);
-      } else if (!isSigningIn) {
-        // Fallback or request sign in if token is expired/missing in memory
-        cachedAccessToken = null;
-        if (onAuthFailure) onAuthFailure();
-      }
-    } else {
-      cachedAccessToken = null;
-      try {
-        localStorage.removeItem('gdrive_access_token');
-      } catch (e) {}
-      if (onAuthFailure) onAuthFailure();
+  const token = cachedAccessToken;
+  let cachedUser = null;
+  try {
+    const savedUser = localStorage.getItem('gdrive_user_info');
+    if (savedUser) {
+      cachedUser = JSON.parse(savedUser);
     }
-  });
+  } catch (e) {}
+
+  if (token && cachedUser) {
+    if (onAuthSuccess) {
+      onAuthSuccess(cachedUser, token);
+    }
+  } else if (token) {
+    fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
+      headers: { Authorization: `Bearer ${token}` }
+    })
+      .then(res => {
+        if (!res.ok) throw new Error();
+        return res.json();
+      })
+      .then(info => {
+        const mockUser = {
+          displayName: info.name || info.given_name || 'Akun Google',
+          email: info.email || '',
+          photoURL: info.picture || null,
+          uid: info.sub || 'gdrive-user'
+        };
+        try {
+          localStorage.setItem('gdrive_user_info', JSON.stringify(mockUser));
+        } catch (e) {}
+        if (onAuthSuccess) onAuthSuccess(mockUser, token);
+      })
+      .catch(() => {
+        const fallbackUser = {
+          displayName: 'Akun Google',
+          email: 'workspace@school.sch.id',
+          photoURL: null,
+          uid: 'gdrive-user'
+        };
+        if (onAuthSuccess) onAuthSuccess(fallbackUser, token);
+      });
+  } else {
+    if (onAuthFailure) onAuthFailure();
+  }
+
+  // Return unsubscribe dummy
+  return () => {};
 };
 
-// Handle standard popup login
-export const googleSignIn = async (): Promise<{ user: User; accessToken: string } | null> => {
-  try {
-    isSigningIn = true;
-    const result = await signInWithPopup(auth, provider);
-    const credential = GoogleAuthProvider.credentialFromResult(result);
-    if (!credential?.accessToken) {
-      throw new Error('Gagal mendapatkan token akses dari Google.');
+// Handle standard Google Identity Services token client popup flow
+export const googleSignIn = async (): Promise<{ user: any; accessToken: string } | null> => {
+  const clientId = (import.meta as any).env.VITE_GOOGLE_CLIENT_ID;
+  if (!clientId) {
+    const errorMsg = 'Google Client ID (VITE_GOOGLE_CLIENT_ID) tidak ditemukan di environment variables. Silakan hubungi Administrator atau tambahkan ke pengaturan .env.';
+    alert(errorMsg);
+    console.warn(errorMsg);
+    throw new Error(errorMsg);
+  }
+
+  return new Promise((resolve, reject) => {
+    if (typeof window === 'undefined' || !(window as any).google) {
+      const errorMsg = 'Google SDK belum siap dimuat di halaman. Harap tunggu beberapa saat atau muat ulang halaman ini.';
+      alert(errorMsg);
+      return reject(new Error(errorMsg));
     }
 
-    cachedAccessToken = credential.accessToken;
     try {
-      localStorage.setItem('gdrive_access_token', cachedAccessToken);
-    } catch (e) {}
-    return { user: result.user, accessToken: cachedAccessToken };
-  } catch (error: any) {
-    console.error('Login Google Drive error:', error);
-    throw error;
-  } finally {
-    isSigningIn = false;
-  }
+      isSigningIn = true;
+      const client = (window as any).google.accounts.oauth2.initTokenClient({
+        client_id: clientId,
+        scope: 'https://www.googleapis.com/auth/drive.readonly https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/drive',
+        ux_mode: 'popup',
+        callback: async (response: any) => {
+          isSigningIn = false;
+          if (response.error) {
+            console.error('Google OAuth2 error response:', response);
+            alert(`Gagal Otorisasi: ${response.error_description || response.error}`);
+            return reject(new Error(response.error_description || response.error));
+          }
+
+          if (response.access_token) {
+            const token = response.access_token;
+            cachedAccessToken = token;
+            try {
+              localStorage.setItem('gdrive_access_token', token);
+            } catch (e) {}
+
+            try {
+              const uRes = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
+                headers: { Authorization: `Bearer ${token}` }
+              });
+              if (uRes.ok) {
+                const info = await uRes.json();
+                const mockUser = {
+                  displayName: info.name || info.given_name || 'Akun Google',
+                  email: info.email || '',
+                  photoURL: info.picture || null,
+                  uid: info.sub || 'gdrive-user'
+                };
+                try {
+                  localStorage.setItem('gdrive_user_info', JSON.stringify(mockUser));
+                } catch (e) {}
+                resolve({ user: mockUser, accessToken: token });
+              } else {
+                throw new Error('Userinfo status failed');
+              }
+            } catch (err) {
+              console.warn('Could not fetch real userinfo, using fallback profile:', err);
+              const fallbackUser = {
+                displayName: 'Akun Google',
+                email: 'workspace@school.sch.id',
+                photoURL: null,
+                uid: 'gdrive-user'
+              };
+              resolve({ user: fallbackUser, accessToken: token });
+            }
+          } else {
+            reject(new Error('Gagal mendapatkan token akses Google.'));
+          }
+        },
+        error_callback: (err: any) => {
+          isSigningIn = false;
+          console.error('Google OAuth Popup error:', err);
+          alert('Proses masuk Google dibatalkan atau pop-up diblokir oleh browser Anda. Mohon izinkan pop-up.');
+          reject(err);
+        }
+      });
+
+      client.requestAccessToken({ prompt: 'consent' });
+    } catch (err: any) {
+      isSigningIn = false;
+      console.error('Failed to initTokenClient:', err);
+      reject(err);
+    }
+  });
 };
 
 export const getAccessToken = (): string | null => {
@@ -73,9 +163,9 @@ export const getAccessToken = (): string | null => {
 };
 
 export const googleSignOut = async () => {
-  await auth.signOut();
   cachedAccessToken = null;
   try {
     localStorage.removeItem('gdrive_access_token');
+    localStorage.removeItem('gdrive_user_info');
   } catch (e) {}
 };
