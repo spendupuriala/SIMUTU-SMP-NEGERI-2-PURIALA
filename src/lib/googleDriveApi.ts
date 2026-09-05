@@ -1,4 +1,4 @@
-import { SiswaNilai, JurnalMengajarHarian } from '../types';
+import { SiswaNilai, JurnalMengajarHarian, AbsenPiket } from '../types';
 
 /**
  * Finds a spreadsheet by name on Google Drive.
@@ -77,6 +77,72 @@ export async function fetchGoogleSheetValuesWithToken(
 }
 
 /**
+ * Normalizes subject names from Google Sheet to match the official 12 subjects.
+ */
+export function normalizeMapel(val: string): string {
+  const s = String(val || '').trim().toLowerCase().replace(/\s+/g, '');
+  if (!s) return 'Matematika';
+
+  if (s.includes('pancasila') || s.includes('kewarganegaraan') || s === 'ppkn' || s === 'pkn') {
+    return 'Pendidikan Pancasila';
+  }
+  if (s.includes('matematika') || s === 'mtk') {
+    return 'Matematika';
+  }
+  if (s.includes('pjok') || s.includes('penjas') || s.includes('olahraga') || s.includes('jasmani')) {
+    return 'PJOK';
+  }
+  if (s === 'ips' || s.includes('sosial') || s.includes('sejarah') || s.includes('ilmapengetahuanosial') || s.includes('sosiologi')) {
+    return 'IPS';
+  }
+  if (s.includes('prakarya') || s.includes('kerajinan')) {
+    return 'Prakarya';
+  }
+  if (s === 'ipa' || s.includes('alam') || s.includes('sains') || s.includes('ilmapengetahuanalam') || s.includes('biologi') || s.includes('fisika')) {
+    return 'IPA';
+  }
+  if (s.includes('agama') || s.includes('islam') || s === 'pai' || s.includes('pendidikanagamaislam')) {
+    return 'Pendidikan Agama Islam';
+  }
+  if (s.includes('koding') || s.includes('coding') || s.includes('pemrograman')) {
+    return 'Koding';
+  }
+  if (s.includes('informatika') || s.includes('komputer') || s === 'tik') {
+    return 'Informatika';
+  }
+  if (s.includes('inggris') || s === 'ing' || s === 'english') {
+    return 'Bahasa Inggris';
+  }
+  if (s.includes('indonesia') || s === 'ind' || s.includes('bahasaindonesia')) {
+    return 'Bahasa Indonesia';
+  }
+  if (s.includes('mulok') || s.includes('lokal') || s.includes('muatanlokal')) {
+    return 'Mulok';
+  }
+
+  // Exact match search in the official 12 subjects
+  const officialMapels = [
+    'Pendidikan Pancasila',
+    'Matematika',
+    'PJOK',
+    'IPS',
+    'Prakarya',
+    'IPA',
+    'Pendidikan Agama Islam',
+    'Koding',
+    'Informatika',
+    'Bahasa Inggris',
+    'Bahasa Indonesia',
+    'Mulok'
+  ];
+  const found = officialMapels.find(m => m.toLowerCase().replace(/\s+/g, '') === s);
+  if (found) return found;
+
+  // Otherwise, do capitalized words
+  return String(val).trim().split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(' ');
+}
+
+/**
  * Parses Google Sheet rows (Nilai) into the application's structure.
  */
 export function parseSheetValuesToNilai(rows: any[][]): SiswaNilai[] {
@@ -88,7 +154,7 @@ export function parseSheetValuesToNilai(rows: any[][]): SiswaNilai[] {
     if (!cells || cells.length < 4) continue;
 
     const rawNamaSiswa = String(cells[1] || '').trim();
-    const mapelValue = String(cells[2] || 'Matematika').trim();
+    const mapelValue = normalizeMapel(String(cells[2] || 'Matematika').trim());
     const rawJpType = String(cells[3] || '').trim();
     const jpTypeLower = rawJpType.toLowerCase();
     const nilaiValue = parseFloat(cells[4]) || 0;
@@ -196,9 +262,46 @@ export function parseSheetValuesToNilai(rows: any[][]): SiswaNilai[] {
 }
 
 /**
+ * Finds the folder JURNAL MENGAJAR_Images with ID '10WNk0RjqId5DKvMq535j1y3Zew7roqyR' and lists all its files to map filenames to their properties.
+ */
+export async function fetchDriveImagesMap(accessToken: string): Promise<Record<string, { id: string; webViewLink?: string; webContentLink?: string; thumbnailLink?: string }>> {
+  const map: Record<string, { id: string; webViewLink?: string; webContentLink?: string; thumbnailLink?: string }> = {};
+  const folderId = '10WNk0RjqId5DKvMq535j1y3Zew7roqyR';
+  try {
+    const filesQuery = encodeURIComponent(`'${folderId}' in parents and trashed=false`);
+    const filesUrl = `https://www.googleapis.com/drive/v3/files?q=${filesQuery}&fields=files(id,name,webViewLink,webContentLink,thumbnailLink)&pageSize=1000`;
+    const filesRes = await fetch(filesUrl, {
+      headers: { Authorization: `Bearer ${accessToken}` }
+    });
+    if (filesRes.ok) {
+      const filesData = await filesRes.json();
+      if (filesData.files) {
+        for (const file of filesData.files) {
+          if (file.name && file.id) {
+            const cleanName = file.name.trim().toLowerCase();
+            map[cleanName] = { 
+              id: file.id, 
+              webViewLink: file.webViewLink,
+              webContentLink: file.webContentLink,
+              thumbnailLink: file.thumbnailLink
+            };
+          }
+        }
+      }
+    }
+  } catch (err) {
+    console.error("Error fetching drive images map:", err);
+  }
+  return map;
+}
+
+/**
  * Parses Google Sheet rows (Jurnal) into the application's structure.
  */
-export function parseSheetValuesToJurnal(rows: any[][]): JurnalMengajarHarian[] {
+export function parseSheetValuesToJurnal(
+  rows: any[][],
+  imagesMap?: Record<string, { id: string; webViewLink?: string; webContentLink?: string; thumbnailLink?: string }>
+): JurnalMengajarHarian[] {
   if (!rows || rows.length <= 1) return [];
   const records: JurnalMengajarHarian[] = [];
 
@@ -219,7 +322,47 @@ export function parseSheetValuesToJurnal(rows: any[][]): JurnalMengajarHarian[] 
 
     const topik = String(cols[9] || '').trim();
     const kegiatan = String(cols[10] || '').trim();
-    const foto = String(cols[11] || '').trim();
+    
+    const rawFoto = String(cols[11] || '').trim();
+    let foto = rawFoto;
+    let fotoDriveId = '';
+    let fotoWebViewLink = '';
+
+    if (rawFoto) {
+      let cleanFilename = rawFoto;
+      if (rawFoto.includes('/')) {
+        cleanFilename = rawFoto.split('/').pop() || rawFoto;
+      }
+      cleanFilename = cleanFilename.trim();
+
+      let foundFile: { id: string; webViewLink?: string; webContentLink?: string; thumbnailLink?: string } | null = null;
+      if (imagesMap) {
+        const cleanLower = cleanFilename.toLowerCase();
+        if (imagesMap[cleanLower]) {
+          foundFile = imagesMap[cleanLower];
+        } else {
+          // Look up where file name in Google Drive contains the extracted sheet name
+          const entry = Object.entries(imagesMap).find(([name]) => name.includes(cleanLower) || cleanLower.includes(name));
+          if (entry) {
+            foundFile = entry[1];
+          }
+        }
+      }
+
+      if (foundFile) {
+        fotoDriveId = foundFile.id;
+        fotoWebViewLink = foundFile.webViewLink || '';
+        foto = foundFile.webContentLink || foundFile.thumbnailLink || `https://lh3.googleusercontent.com/d/${foundFile.id}`;
+      } else {
+        // Fallback: match by URL
+        const idMatch = rawFoto.match(/id=([^&]+)/) || rawFoto.match(/\/d\/([^/]+)/);
+        if (idMatch && idMatch[1]) {
+          fotoDriveId = idMatch[1];
+          foto = `https://lh3.googleusercontent.com/d/${fotoDriveId}`;
+        }
+      }
+    }
+
     const keterangan = String(cols[12] || 'TEPAT WAKTU').trim();
 
     if (namaGuru.toLowerCase().includes('guru') && mapel.toLowerCase().includes('mapel')) continue;
@@ -237,7 +380,9 @@ export function parseSheetValuesToJurnal(rows: any[][]): JurnalMengajarHarian[] 
       topik,
       kegiatan,
       foto,
-      keterangan
+      keterangan,
+      fotoDriveId,
+      fotoWebViewLink
     });
   }
 
@@ -341,6 +486,199 @@ export async function uploadFileToGoogleDrive(
     const errorText = await response.text();
     console.error('Google Drive Upload failed:', errorText);
     throw new Error('Google Drive upload failed: ' + errorText);
+  }
+}
+
+export function parsePiketSheetValues(datangRows: any[][], pulangRows: any[][]): AbsenPiket[] {
+  const map: Record<string, { tanggal: string; namaGuru: string; jamDatang: string; jamPulang: string }> = {};
+
+  // Find column indices dynamically
+  const getColIndices = (headers: any[], mode: 'datang' | 'pulang') => {
+    let namaIdx = -1;
+    let tanggalIdx = -1;
+    let waktuIdx = -1;
+
+    if (headers) {
+      for (let i = 0; i < headers.length; i++) {
+        const val = String(headers[i] || '').toLowerCase().trim();
+        if (val.includes('nama') || val.includes('guru') || val.includes('nip')) {
+          if (namaIdx === -1 || val.includes('nama')) namaIdx = i;
+        }
+        if (val.includes('tanggal') || val.includes('tgl') || val.includes('date')) {
+          tanggalIdx = i;
+        }
+        
+        // Exact column matching matching requested columns first
+        if (mode === 'datang' && val.includes('datang') && !val.includes('jadwal')) {
+          waktuIdx = i;
+        } else if (mode === 'pulang' && val.includes('pulang') && !val.includes('jadwal')) {
+          waktuIdx = i;
+        }
+      }
+
+      // Safe fallbacks if specific mode column was not found
+      if (waktuIdx === -1) {
+        for (let i = 0; i < headers.length; i++) {
+          const val = String(headers[i] || '').toLowerCase().trim();
+          if ((val.includes('jam') || val.includes('waktu') || val.includes('pukul') || val.includes('time') || val.includes('timestamp')) && !val.includes('jadwal')) {
+            waktuIdx = i;
+            break;
+          }
+        }
+      }
+    }
+
+    // Fallbacks if not found
+    if (namaIdx === -1) namaIdx = 1;
+    if (tanggalIdx === -1) tanggalIdx = 2;
+    if (waktuIdx === -1) waktuIdx = 3;
+
+    return { namaIdx, tanggalIdx, waktuIdx };
+  };
+
+  // 1. Process ABSEN DATANG
+  if (datangRows && datangRows.length > 1) {
+    const headers = datangRows[0];
+    const { namaIdx, tanggalIdx, waktuIdx } = getColIndices(headers, 'datang');
+
+    for (let i = 1; i < datangRows.length; i++) {
+      const cols = datangRows[i];
+      if (!cols || cols.length === 0) continue;
+
+      const nama = String(cols[namaIdx] || '').trim();
+      const tanggal = String(cols[tanggalIdx] || '').trim();
+      let jam = String(cols[waktuIdx] || '').trim();
+
+      if (!nama || nama.toLowerCase().includes('nama') || nama.toLowerCase().includes('guru')) continue;
+
+      if (jam.includes(' ') && (jam.includes(':') || jam.includes('.'))) {
+        const parts = jam.split(' ');
+        jam = parts[parts.length - 1];
+      }
+
+      const key = `${nama.toLowerCase()}_${tanggal}`;
+      map[key] = {
+        tanggal,
+        namaGuru: nama,
+        jamDatang: jam || '-',
+        jamPulang: '-'
+      };
+    }
+  }
+
+  // 2. Process ABSEN PULANG
+  if (pulangRows && pulangRows.length > 1) {
+    const headers = pulangRows[0];
+    const { namaIdx, tanggalIdx, waktuIdx } = getColIndices(headers, 'pulang');
+
+    for (let i = 1; i < pulangRows.length; i++) {
+      const cols = pulangRows[i];
+      if (!cols || cols.length === 0) continue;
+
+      const nama = String(cols[namaIdx] || '').trim();
+      const tanggal = String(cols[tanggalIdx] || '').trim();
+      let jam = String(cols[waktuIdx] || '').trim();
+
+      if (!nama || nama.toLowerCase().includes('nama') || nama.toLowerCase().includes('guru')) continue;
+
+      if (jam.includes(' ') && (jam.includes(':') || jam.includes('.'))) {
+        const parts = jam.split(' ');
+        jam = parts[parts.length - 1];
+      }
+
+      const key = `${nama.toLowerCase()}_${tanggal}`;
+      if (map[key]) {
+        map[key].jamPulang = jam || '-';
+      } else {
+        map[key] = {
+          tanggal,
+          namaGuru: nama,
+          jamDatang: '-',
+          jamPulang: jam || '-'
+        };
+      }
+    }
+  }
+
+  // Convert map to list of AbsenPiket items
+  const result: AbsenPiket[] = Object.values(map).map((entry, idx) => {
+    let status: 'Lengkap' | 'TIDAK ABSEN PULANG' | 'TIDAK ABSEN DATANG' = 'Lengkap';
+    let keterangan = 'Hadir Lengkap';
+
+    if (entry.jamDatang === '-') {
+      status = 'TIDAK ABSEN DATANG';
+      keterangan = 'Tidak melakukan absen datang';
+    } else if (entry.jamPulang === '-') {
+      status = 'TIDAK ABSEN PULANG';
+      keterangan = 'Tidak melakukan absen pulang';
+    }
+
+    return {
+      id: `piket-imported-${idx}-${Date.now()}`,
+      tanggal: entry.tanggal,
+      namaGuru: entry.namaGuru,
+      jamDatang: entry.jamDatang,
+      jamPulang: entry.jamPulang,
+      status,
+      keterangan
+    };
+  });
+
+  return result.sort((a, b) => b.tanggal.localeCompare(a.tanggal));
+}
+
+export function parseCSVTo2DArray(csvText: string): any[][] {
+  if (!csvText || !csvText.trim()) return [];
+  const lines = csvText.split(/\r?\n/);
+  const result: any[][] = [];
+
+  const splitCSVRow = (row: string): string[] => {
+    const cells: string[] = [];
+    let current = '';
+    let inQuotes = false;
+    for (let i = 0; i < row.length; i++) {
+      const char = row[i];
+      if (char === '"') {
+        inQuotes = !inQuotes;
+      } else if (char === ',' && !inQuotes) {
+        cells.push(current.trim().replace(/^"|"$/g, ''));
+        current = '';
+      } else {
+        current += char;
+      }
+    }
+    cells.push(current.trim().replace(/^"|"$/g, ''));
+    return cells;
+  };
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i].trim();
+    if (line) {
+      result.push(splitCSVRow(line));
+    }
+  }
+  return result;
+}
+
+export async function fetchPublicGoogleSheetValues(spreadsheetId: string, sheetName: string): Promise<any[][]> {
+  try {
+    const sheetIdClean = spreadsheetId.trim();
+    const sheetNameEncoded = encodeURIComponent(sheetName);
+    const url = `https://docs.google.com/spreadsheets/d/${sheetIdClean}/gviz/tq?tqx=out:csv&sheet=${sheetNameEncoded}`;
+    
+    const response = await fetch(url);
+    if (!response.ok) {
+      throw new Error(`Gagal menghubungi Google Sheets Server (${response.status})`);
+    }
+    const csvText = await response.text();
+    return parseCSVTo2DArray(csvText);
+  } catch (error: any) {
+    console.warn('Public sheet fetch issue:', error);
+    let cleanMsg = error.message || String(error);
+    if (cleanMsg.includes('Failed to fetch') || cleanMsg.includes('failed to fetch') || cleanMsg.includes('fetch')) {
+      cleanMsg = "Koneksi jaringan dibatasi (CORS / Peramban)";
+    }
+    throw new Error(cleanMsg);
   }
 }
 

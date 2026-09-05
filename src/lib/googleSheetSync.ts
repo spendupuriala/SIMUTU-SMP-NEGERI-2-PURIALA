@@ -1,7 +1,8 @@
 import { SiswaNilai, JurnalMengajarHarian } from '../types';
+import { normalizeMapel } from './googleDriveApi';
 
 // Default Spreadsheet ID provided by user
-export const DEFAULT_SPREADSHEET_ID = '1YweatgIflJgYXm4PeVMiE22U_C7rRghV22zCF_RfXYQ';
+export const DEFAULT_SPREADSHEET_ID = '1khEqfRH_nulcMllKz45oA5-sEEAWN-KjXZP538tC3Sg';
 export const DEFAULT_SHEET_NAME = 'NILAI';
 
 /**
@@ -50,7 +51,7 @@ export function parseCSVToNilai(csvText: string): SiswaNilai[] {
     // 4. Ambil Nilai dari Kolom E (index 4)
     // 5. Ambil Kelas dari Kolom H (index 7, fallback to 5 or 'VII.A')
     const rawNamaSiswa = cells[1] || '';
-    const mapelValue = cells[2] || 'Matematika';
+    const mapelValue = normalizeMapel(cells[2] || 'Matematika');
     const rawJpType = (cells[3] || '').trim();
     const jpTypeLower = rawJpType.toLowerCase();
     const nilaiValue = parseFloat(cells[4]) || 0;
@@ -174,8 +175,12 @@ export async function fetchGoogleSheetNilai(spreadsheetId: string = DEFAULT_SPRE
     const csvText = await response.text();
     return parseCSVToNilai(csvText);
   } catch (error: any) {
-    console.error('Google Sheet fetch error:', error);
-    throw error;
+    console.warn('Google Sheet fetch issue:', error);
+    let cleanMsg = error.message || String(error);
+    if (cleanMsg.includes('Failed to fetch') || cleanMsg.includes('failed to fetch') || cleanMsg.includes('fetch')) {
+      cleanMsg = "Koneksi jaringan dibatasi (CORS / Peramban)";
+    }
+    throw new Error(cleanMsg);
   }
 }
 
@@ -280,8 +285,12 @@ export async function fetchGoogleSheetJurnal(spreadsheetId: string = DEFAULT_SPR
     const csvText = await response.text();
     return parseCSVToJurnal(csvText);
   } catch (error: any) {
-    console.error('Google Sheet Jurnal fetch error:', error);
-    throw error;
+    console.warn('Google Sheet Jurnal fetch issue:', error);
+    let cleanMsg = error.message || String(error);
+    if (cleanMsg.includes('Failed to fetch') || cleanMsg.includes('failed to fetch') || cleanMsg.includes('fetch')) {
+      cleanMsg = "Koneksi jaringan dibatasi (CORS / Peramban)";
+    }
+    throw new Error(cleanMsg);
   }
 }
 

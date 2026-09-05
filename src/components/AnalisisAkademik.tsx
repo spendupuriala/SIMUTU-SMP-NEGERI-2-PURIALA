@@ -161,7 +161,21 @@ export default function AnalisisAkademik({
 
   // Unique lists for selector options
   const kelasList = ['Semua', 'VII.A', 'VII.B', 'VIII', 'IX'];
-  const mapelList = ['Semua', 'Matematika', 'IPA', 'IPS', 'Bahasa Indonesia', 'Bahasa Inggris', 'Pancasila'];
+  const mapelList = [
+    'Semua',
+    'Pendidikan Pancasila',
+    'Matematika',
+    'PJOK',
+    'IPS',
+    'Prakarya',
+    'IPA',
+    'Pendidikan Agama Islam',
+    'Koding',
+    'Informatika',
+    'Bahasa Inggris',
+    'Bahasa Indonesia',
+    'Mulok'
+  ];
 
   // Leger statistics computation
   const stats = React.useMemo(() => {
@@ -191,7 +205,20 @@ export default function AnalisisAkademik({
 
   // Chart data for subjects (computed for selectedKelas)
   const chartDataMapel = React.useMemo(() => {
-    const mapels = ['Matematika', 'IPA', 'IPS', 'Bahasa Indonesia', 'Bahasa Inggris', 'Pancasila'];
+    const mapels = [
+      'Pendidikan Pancasila',
+      'Matematika',
+      'PJOK',
+      'IPS',
+      'Prakarya',
+      'IPA',
+      'Pendidikan Agama Islam',
+      'Koding',
+      'Informatika',
+      'Bahasa Inggris',
+      'Bahasa Indonesia',
+      'Mulok'
+    ];
     return mapels.map(m => {
       const records = nilaiSiswa.filter(n => {
         const matchK = selectedKelas === 'Semua' ? true : n.kelas === selectedKelas;
@@ -1041,7 +1068,20 @@ export default function AnalisisAkademik({
                     onChange={(e) => setFormMapel(e.target.value)}
                     className="w-full text-xs p-2.5 bg-slate-50 border border-slate-200 focus:border-indigo-500 rounded-lg outline-none cursor-pointer"
                   >
-                    {['Matematika', 'IPA', 'IPS', 'Bahasa Indonesia', 'Bahasa Inggris', 'Pancasila'].map(m => (
+                    {[
+                      'Pendidikan Pancasila',
+                      'Matematika',
+                      'PJOK',
+                      'IPS',
+                      'Prakarya',
+                      'IPA',
+                      'Pendidikan Agama Islam',
+                      'Koding',
+                      'Informatika',
+                      'Bahasa Inggris',
+                      'Bahasa Indonesia',
+                      'Mulok'
+                    ].map(m => (
                       <option key={m} value={m}>{m}</option>
                     ))}
                   </select>

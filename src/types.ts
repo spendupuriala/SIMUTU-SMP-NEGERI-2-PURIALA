@@ -20,7 +20,7 @@ export interface SiswaNilai {
   nisn: string;
   nama: string;
   kelas: string; // '7A', '7B', '8A', '8B', '9A', '9B'
-  mapel: string; // 'Matematika', 'IPA', 'IPS', 'Bahasa Indonesia', 'Bahasa Inggris', 'Pancasila'
+  mapel: string; // 'Pendidikan Pancasila', 'Matematika', 'PJOK', 'IPS', 'Prakarya', 'IPA', 'Pendidikan Agama Islam', 'Koding', 'Informatika', 'Bahasa Inggris', 'Bahasa Indonesia', 'Mulok'
   tugas: number;
   uh: number; // Ulangan Harian
   uts: number;
@@ -508,7 +508,7 @@ export const INITIAL_JURNAL: JurnalMengajar[] = [
     id: 'jur-6',
     tanggal: '2026-08-26',
     namaGuru: 'Dewi Lestari, S.Pd.',
-    mapel: 'Pancasila',
+    mapel: 'Pendidikan Pancasila',
     kelas: 'VII.A',
     jamKe: '5-6',
     materiAjar: 'Sejarah Perumusan Pancasila sebagai Dasar Negara',
@@ -531,6 +531,8 @@ export interface JurnalMengajarHarian {
   kegiatan: string;
   foto: string;
   keterangan: string;
+  fotoDriveId?: string;
+  fotoWebViewLink?: string;
 }
 
 export const INITIAL_JURNAL_HARIAN: JurnalMengajarHarian[] = [
@@ -589,5 +591,45 @@ export const INITIAL_JURNAL_HARIAN: JurnalMengajarHarian[] = [
     kegiatan: 'Siswa berpasangan mendeskripsikan teman sebangku menggunakan adjectives yang tepat dalam percakapan terpandu.',
     foto: 'https://images.unsplash.com/photo-1516321318423-f06f85e504b3?auto=format&fit=crop&q=80&w=400',
     keterangan: 'TEPAT WAKTU'
+  }
+];
+
+export interface AbsenPiket {
+  id: string;
+  tanggal: string;
+  namaGuru: string;
+  jamDatang: string;
+  jamPulang: string;
+  status: 'Lengkap' | 'TIDAK ABSEN PULANG' | 'TIDAK ABSEN DATANG';
+  keterangan: string;
+}
+
+export const INITIAL_ABSEN_PIKET: AbsenPiket[] = [
+  {
+    id: 'piket-1',
+    tanggal: '2026-09-04',
+    namaGuru: 'Drs. Ahmad Junaedi',
+    jamDatang: '06.45',
+    jamPulang: '14.05',
+    status: 'Lengkap',
+    keterangan: 'Hadir Lengkap'
+  },
+  {
+    id: 'piket-2',
+    tanggal: '2026-09-04',
+    namaGuru: 'Sri Wahyuni, S.S.',
+    jamDatang: '07.10',
+    jamPulang: '-',
+    status: 'TIDAK ABSEN PULANG',
+    keterangan: 'Belum melakukan absen pulang'
+  },
+  {
+    id: 'piket-3',
+    tanggal: '2026-09-04',
+    namaGuru: 'Budi Santoso, M.Pd.',
+    jamDatang: '-',
+    jamPulang: '14.15',
+    status: 'TIDAK ABSEN DATANG',
+    keterangan: 'Hanya melakukan absen pulang'
   }
 ];

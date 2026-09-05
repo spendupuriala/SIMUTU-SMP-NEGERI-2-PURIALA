@@ -59,12 +59,21 @@ export default function JurnalMengajarView({
   }, [googleSheetId]);
 
   // Photo viewer modal state
-  const [activePhoto, setActivePhoto] = useState<{ url: string; title: string } | null>(null);
+  const [activePhoto, setActivePhoto] = useState<{ 
+    url: string; 
+    title: string; 
+    driveUrl?: string; 
+    fileId?: string; 
+  } | null>(null);
 
   // Handle Sheet ID Update
   const handleSaveConfig = (e: React.FormEvent) => {
     e.preventDefault();
-    setGoogleSheetId(localSheetId.trim());
+    const cleanId = localSheetId.trim();
+    setGoogleSheetId(cleanId);
+    try {
+      localStorage.setItem('kurikulum_google_sheet_id', cleanId);
+    } catch (err) {}
     setShowConfig(false);
   };
 
@@ -484,7 +493,12 @@ export default function JurnalMengajarView({
                       <td className="py-4 px-3 text-center">
                         {item.foto ? (
                           <button
-                            onClick={() => setActivePhoto({ url: item.foto, title: `${item.namaGuru} - ${item.mapel}` })}
+                            onClick={() => setActivePhoto({ 
+                              url: item.foto, 
+                              title: `${item.namaGuru} - ${item.mapel}`,
+                              driveUrl: item.fotoWebViewLink,
+                              fileId: item.fotoDriveId
+                            })}
                             className="inline-flex items-center gap-1 text-[10px] text-indigo-600 hover:text-indigo-800 font-bold hover:bg-indigo-50 border border-indigo-200/40 px-2 py-1 rounded-lg transition-colors cursor-pointer"
                           >
                             <ImageIcon className="h-3 w-3" />
@@ -541,7 +555,7 @@ export default function JurnalMengajarView({
             </div>
 
             {/* Photo content */}
-            <div className="p-4 bg-slate-950 flex items-center justify-center min-h-[300px]">
+            <div className="p-4 bg-slate-950 flex flex-col items-center justify-center min-h-[300px] relative">
               <img
                 src={activePhoto.url}
                 alt="Dokumentasi KBM"
@@ -550,15 +564,29 @@ export default function JurnalMengajarView({
                   // Fallback if image fails to load
                   e.currentTarget.src = "https://images.unsplash.com/photo-1580582932707-520aed937b7b?auto=format&fit=crop&q=80&w=600";
                 }}
-                className="max-h-[450px] w-auto max-w-full object-contain rounded-lg shadow-md"
+                className="max-h-[400px] w-auto max-w-full object-contain rounded-lg shadow-md"
               />
+              
+              {(activePhoto.driveUrl || activePhoto.fileId) && (
+                <div className="mt-4 w-full flex justify-center">
+                  <a
+                    href={activePhoto.driveUrl || `https://drive.google.com/file/d/${activePhoto.fileId}/view?usp=drivesdk`}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs px-5 py-2.5 rounded-xl flex items-center gap-2 shadow-lg hover:shadow-indigo-500/20 transition-all cursor-pointer"
+                  >
+                    <ExternalLink className="h-3.5 w-3.5" />
+                    <span>Buka Foto di Drive</span>
+                  </a>
+                </div>
+              )}
             </div>
 
             {/* Footer */}
             <div className="px-5 py-3.5 bg-slate-50 text-[10px] text-slate-500 flex justify-between items-center">
               <span>Rerunning Referrer Block: Protected Access</span>
               <a 
-                href={activePhoto.url} 
+                href={activePhoto.driveUrl || activePhoto.url} 
                 target="_blank" 
                 rel="noreferrer"
                 className="font-bold text-indigo-600 flex items-center gap-1 hover:text-indigo-800"

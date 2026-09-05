@@ -625,7 +625,20 @@ export default function SupervisiGuruView({
                     onChange={(e) => setFormMapel(e.target.value)}
                     className="w-full text-xs p-2.5 bg-slate-50 border border-slate-200 focus:border-indigo-500 rounded-lg outline-none cursor-pointer"
                   >
-                    {['Matematika', 'IPA', 'IPS', 'Bahasa Indonesia', 'Bahasa Inggris', 'Pancasila'].map(m => (
+                    {[
+                      'Pendidikan Pancasila',
+                      'Matematika',
+                      'PJOK',
+                      'IPS',
+                      'Prakarya',
+                      'IPA',
+                      'Pendidikan Agama Islam',
+                      'Koding',
+                      'Informatika',
+                      'Bahasa Inggris',
+                      'Bahasa Indonesia',
+                      'Mulok'
+                    ].map(m => (
                       <option key={m} value={m}>{m}</option>
                     ))}
                   </select>
@@ -781,7 +794,20 @@ export default function SupervisiGuruView({
                     onChange={(e) => setFormAddMapel(e.target.value)}
                     className="w-full text-xs p-2.5 bg-slate-50 border border-slate-200 focus:border-indigo-500 rounded-lg outline-none cursor-pointer"
                   >
-                    {['Matematika', 'IPA', 'IPS', 'Bahasa Indonesia', 'Bahasa Inggris', 'Pancasila'].map(m => (
+                    {[
+                      'Pendidikan Pancasila',
+                      'Matematika',
+                      'PJOK',
+                      'IPS',
+                      'Prakarya',
+                      'IPA',
+                      'Pendidikan Agama Islam',
+                      'Koding',
+                      'Informatika',
+                      'Bahasa Inggris',
+                      'Bahasa Indonesia',
+                      'Mulok'
+                    ].map(m => (
                       <option key={m} value={m}>{m}</option>
                     ))}
                   </select>

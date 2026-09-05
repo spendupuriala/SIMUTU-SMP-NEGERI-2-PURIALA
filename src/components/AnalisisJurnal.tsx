@@ -259,12 +259,22 @@ export default function AnalisisJurnal({
                     onChange={(e) => setFormMapel(e.target.value)}
                     className="w-full border border-slate-200 rounded-lg p-2 text-xs"
                   >
-                    <option value="Matematika">Matematika</option>
-                    <option value="IPA">IPA</option>
-                    <option value="IPS">IPS</option>
-                    <option value="Bahasa Indonesia">Bahasa Indonesia</option>
-                    <option value="Bahasa Inggris">Bahasa Inggris</option>
-                    <option value="Pancasila">Pancasila</option>
+                    {[
+                      'Pendidikan Pancasila',
+                      'Matematika',
+                      'PJOK',
+                      'IPS',
+                      'Prakarya',
+                      'IPA',
+                      'Pendidikan Agama Islam',
+                      'Koding',
+                      'Informatika',
+                      'Bahasa Inggris',
+                      'Bahasa Indonesia',
+                      'Mulok'
+                    ].map(m => (
+                      <option key={m} value={m}>{m}</option>
+                    ))}
                   </select>
                 </div>
               </div>

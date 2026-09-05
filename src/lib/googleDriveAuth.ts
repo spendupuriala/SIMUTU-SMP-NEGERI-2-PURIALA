@@ -162,6 +162,46 @@ export const getAccessToken = (): string | null => {
   return cachedAccessToken;
 };
 
+export const setManualAccessToken = async (token: string): Promise<{ user: any; accessToken: string }> => {
+  cachedAccessToken = token;
+  try {
+    localStorage.setItem('gdrive_access_token', token);
+  } catch (e) {}
+  
+  try {
+    const uRes = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
+      headers: { Authorization: `Bearer ${token}` }
+    });
+    if (uRes.ok) {
+      const info = await uRes.json();
+      const mockUser = {
+        displayName: info.name || info.given_name || 'Akun Google (Manual)',
+        email: info.email || '',
+        photoURL: info.picture || null,
+        uid: info.sub || 'gdrive-user'
+      };
+      try {
+        localStorage.setItem('gdrive_user_info', JSON.stringify(mockUser));
+      } catch (e) {}
+      return { user: mockUser, accessToken: token };
+    } else {
+      throw new Error('Userinfo status failed');
+    }
+  } catch (err) {
+    console.warn('Could not fetch real userinfo for manual token, using fallback:', err);
+    const fallbackUser = {
+      displayName: 'Akun Google (Manual)',
+      email: 'workspace@school.sch.id',
+      photoURL: null,
+      uid: 'gdrive-user'
+    };
+    try {
+      localStorage.setItem('gdrive_user_info', JSON.stringify(fallbackUser));
+    } catch (e) {}
+    return { user: fallbackUser, accessToken: token };
+  }
+};
+
 export const googleSignOut = async () => {
   cachedAccessToken = null;
   try {

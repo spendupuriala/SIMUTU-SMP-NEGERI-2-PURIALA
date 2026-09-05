@@ -7,9 +7,10 @@ import SupervisiGuruView from './components/SupervisiGuru';
 import DokumenKurikulumView from './components/DokumenKurikulum';
 import JurnalMengajarView from './components/JurnalMengajar';
 import AnalisisJurnal from './components/AnalisisJurnal';
+import AbsenPiketView from './components/AbsenPiket';
 import { User } from 'firebase/auth';
-import { initAuth, googleSignIn, googleSignOut } from './lib/googleDriveAuth';
-import { fetchGoogleSheetValuesWithToken, parseSheetValuesToNilai, parseSheetValuesToJurnal, findSpreadsheetByName } from './lib/googleDriveApi';
+import { initAuth, googleSignIn, googleSignOut, setManualAccessToken } from './lib/googleDriveAuth';
+import { fetchGoogleSheetValuesWithToken, parseSheetValuesToNilai, parseSheetValuesToJurnal, findSpreadsheetByName, fetchDriveImagesMap, parsePiketSheetValues, fetchPublicGoogleSheetValues } from './lib/googleDriveApi';
 import { 
   ProgramKerja, 
   SiswaNilai, 
@@ -20,6 +21,7 @@ import {
   DokumenKurikulum,
   JurnalMengajar,
   JurnalMengajarHarian,
+  AbsenPiket,
   INITIAL_PROGRAMS,
   INITIAL_SISWA_NILAI,
   INITIAL_INTERVENSI,
@@ -27,7 +29,8 @@ import {
   INITIAL_COMPLIANCE,
   INITIAL_DOCUMENTS,
   INITIAL_JURNAL,
-  INITIAL_JURNAL_HARIAN
+  INITIAL_JURNAL_HARIAN,
+  INITIAL_ABSEN_PIKET
 } from './types';
 import { 
   DEFAULT_SPREADSHEET_ID, 
@@ -43,7 +46,9 @@ import {
   Clock,
   Menu,
   Search,
-  LogOut
+  LogOut,
+  X,
+  AlertCircle
 } from 'lucide-react';
 
 export default function App() {
@@ -75,8 +80,14 @@ export default function App() {
     };
   }, []);
 
+  const [showManualTokenModal, setShowManualTokenModal] = useState<boolean>(false);
+  const [manualTokenInput, setManualTokenInput] = useState<string>('');
+  const [manualTokenError, setManualTokenError] = useState<string | null>(null);
+  const [lastLoginError, setLastLoginError] = useState<string | null>(null);
+
   const handleGoogleLogin = async () => {
     setIsLoggingIn(true);
+    setLastLoginError(null);
     try {
       const result = await googleSignIn();
       if (result) {
@@ -84,8 +95,34 @@ export default function App() {
         setGDriveToken(result.accessToken);
         setGDriveNeedsAuth(false);
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error('Sign in failed:', err);
+      const errMsg = err?.message || String(err);
+      setLastLoginError(errMsg);
+      // Automatically show manual fallback when popup window is closed or blocked inside the cross-origin iframe
+      setShowManualTokenModal(true);
+    } finally {
+      setIsLoggingIn(false);
+    }
+  };
+
+  const handleManualTokenSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!manualTokenInput.trim()) {
+      setManualTokenError('Access token tidak boleh kosong.');
+      return;
+    }
+    setIsLoggingIn(true);
+    setManualTokenError(null);
+    try {
+      const result = await setManualAccessToken(manualTokenInput.trim());
+      setGDriveUser(result.user);
+      setGDriveToken(result.accessToken);
+      setGDriveNeedsAuth(false);
+      setShowManualTokenModal(false);
+      setManualTokenInput('');
+    } catch (err: any) {
+      setManualTokenError(err.message || 'Token tidak valid atau tidak dapat memverifikasi profil.');
     } finally {
       setIsLoggingIn(false);
     }
@@ -104,7 +141,15 @@ export default function App() {
 
   // Google Sheets Sync Configuration States
   const [googleSheetId, setGoogleSheetId] = useState<string>(() => {
-    return localStorage.getItem('kurikulum_google_sheet_id') || DEFAULT_SPREADSHEET_ID;
+    const saved = localStorage.getItem('kurikulum_google_sheet_id');
+    if (saved && saved.trim() !== '') {
+      return saved;
+    }
+    const defaultId = '1khEqfRH_nulcMllKz45oA5-sEEAWN-KjXZP538tC3Sg';
+    try {
+      localStorage.setItem('kurikulum_google_sheet_id', defaultId);
+    } catch (e) {}
+    return defaultId;
   });
 
   const [googleWebhookUrl, setGoogleWebhookUrl] = useState<string>(() => {
@@ -165,6 +210,23 @@ export default function App() {
     return saved ? new Date(saved) : null;
   });
 
+  // Absen Piket states
+  const [absenPiket, setAbsenPiket] = useState<AbsenPiket[]>(() => {
+    const saved = localStorage.getItem('kurikulum_absen_piket');
+    return saved ? JSON.parse(saved) : INITIAL_ABSEN_PIKET;
+  });
+
+  const [googlePiketSheetId, setGooglePiketSheetId] = useState<string>(() => {
+    const saved = localStorage.getItem('kurikulum_google_piket_sheet_id');
+    return saved || '11UF_YrzScgc4SwRf9B9GeEKVYXhkQUBGJremP60RU4I';
+  });
+
+  const [piketSyncLoading, setPiketSyncLoading] = useState<boolean>(false);
+  const [piketSyncError, setPiketSyncError] = useState<string | null>(null);
+  const [lastPiketSyncTime, setLastPiketSyncTime] = useState<string | null>(() => {
+    return localStorage.getItem('kurikulum_last_piket_sync_time') || null;
+  });
+
   const [notifications, setNotifications] = useState<string[]>([]);
   const [isNotifOpen, setIsNotifOpen] = useState(false);
 
@@ -202,6 +264,14 @@ export default function App() {
   }, [jurnalHarian]);
 
   useEffect(() => {
+    localStorage.setItem('kurikulum_absen_piket', JSON.stringify(absenPiket));
+  }, [absenPiket]);
+
+  useEffect(() => {
+    localStorage.setItem('kurikulum_google_piket_sheet_id', googlePiketSheetId);
+  }, [googlePiketSheetId]);
+
+  useEffect(() => {
     localStorage.setItem('kurikulum_google_sheet_id', googleSheetId);
   }, [googleSheetId]);
 
@@ -214,7 +284,7 @@ export default function App() {
     setGoogleSyncLoading(true);
     setGoogleSyncError(null);
     try {
-      const targetId = customId || googleSheetId;
+      const targetId = (customId || googleSheetId || localStorage.getItem('kurikulum_google_sheet_id') || '1khEqfRH_nulcMllKz45oA5-sEEAWN-KjXZP538tC3Sg').trim();
       
       let data: SiswaNilai[] = [];
       
@@ -245,9 +315,14 @@ export default function App() {
         throw new Error("Data sheet kosong atau tidak valid.");
       }
     } catch (error: any) {
-      const msg = error.message || "Gagal mengimpor dari Google Sheets. Pastikan link diatur agar semua orang yang memiliki link dapat melihat.";
+      console.warn("Google Sheets Nilai Sync issue:", String(error).replace(/Failed to fetch/gi, "Koneksi jaringan dibatasi (CORS)"));
+      let msg = error.message || String(error);
+      if (msg.includes('Failed to fetch') || msg.includes('failed to fetch') || msg.includes('fetch')) {
+        msg = "Gagal memuat (Koneksi jaringan dibatasi / CORS Block): Koneksi langsung diblokir oleh peramban atau sheet belum dipublikasikan. Solusi: (1) Hubungkan Google Drive Anda di panel atas untuk melewati batasan CORS secara aman, atau (2) Pada Spreadsheet, pilih File > Bagikan > Publikasikan ke web, pilih format CSV, lalu publikasikan.";
+      } else {
+        msg = "Gagal mengimpor dari Google Sheets: " + msg;
+      }
       setGoogleSyncError(msg);
-      console.error(error);
     } finally {
       setGoogleSyncLoading(false);
     }
@@ -258,7 +333,7 @@ export default function App() {
     setJurnalSyncLoading(true);
     setJurnalSyncError(null);
     try {
-      let targetId = sheetId || googleSheetId;
+      let targetId = (sheetId || googleSheetId || localStorage.getItem('kurikulum_google_sheet_id') || '1khEqfRH_nulcMllKz45oA5-sEEAWN-KjXZP538tC3Sg').trim();
       
       if (gDriveToken) {
         try {
@@ -276,8 +351,9 @@ export default function App() {
       
       if (gDriveToken) {
         try {
+          const imagesMap = await fetchDriveImagesMap(gDriveToken);
           const rows = await fetchGoogleSheetValuesWithToken(gDriveToken, targetId, 'JURNAL MENGAJAR');
-          records = parseSheetValuesToJurnal(rows);
+          records = parseSheetValuesToJurnal(rows, imagesMap);
         } catch (authError: any) {
           console.warn("REST API Jurnal fetch failed, trying public CSV fallback:", authError);
           records = await fetchGoogleSheetJurnal(targetId);
@@ -295,11 +371,81 @@ export default function App() {
         throw new Error('Tidak ada data jurnal yang berhasil dibaca dari Google Sheet JURNAL MENGAJAR.');
       }
     } catch (err: any) {
-      const msg = err.message || 'Gagal menyinkronkan data Jurnal Mengajar dari Google Sheets.';
+      console.warn("Google Sheets Jurnal Sync issue:", String(err).replace(/Failed to fetch/gi, "Koneksi jaringan dibatasi (CORS)"));
+      let msg = err.message || String(err);
+      if (msg.includes('Failed to fetch') || msg.includes('failed to fetch') || msg.includes('fetch')) {
+        msg = "Gagal memuat Jurnal (Koneksi jaringan dibatasi / CORS Block): Koneksi diblokir oleh peramban atau sheet belum dipublikasikan. Solusi: (1) Hubungkan Google Drive Anda di panel atas untuk melewati batasan CORS secara aman, atau (2) Pastikan spreadsheet Anda telah dipublikasikan ke web (File > Bagikan > Publikasikan ke web).";
+      } else {
+        msg = "Gagal menyinkronkan data Jurnal Mengajar dari Google Sheets: " + msg;
+      }
       setJurnalSyncError(msg);
-      throw err;
+      throw new Error(msg);
     } finally {
       setJurnalSyncLoading(false);
+    }
+  };
+
+  // Handler: Pull/sync Absen Piket from Google Sheets
+  const handlePullPiket = async (sheetId?: string) => {
+    setPiketSyncLoading(true);
+    setPiketSyncError(null);
+    try {
+      let targetId = (sheetId || googlePiketSheetId || '11UF_YrzScgc4SwRf9B9GeEKVYXhkQUBGJremP60RU4I').trim();
+      let datangRows: any[][] = [];
+      let pulangRows: any[][] = [];
+
+      if (gDriveToken) {
+        try {
+          // Attempt authenticated fetching via Google Drive API
+          [datangRows, pulangRows] = await Promise.all([
+            fetchGoogleSheetValuesWithToken(gDriveToken, targetId, 'ABSEN DATANG'),
+            fetchGoogleSheetValuesWithToken(gDriveToken, targetId, 'ABSEN PULANG')
+          ]);
+        } catch (authError: any) {
+          console.warn("REST API Piket fetch failed, trying public CSV fallback:", authError);
+          // Fallback to public CSV
+          [datangRows, pulangRows] = await Promise.all([
+            fetchPublicGoogleSheetValues(targetId, 'ABSEN DATANG'),
+            fetchPublicGoogleSheetValues(targetId, 'ABSEN PULANG')
+          ]);
+        }
+      } else {
+        // Fallback to public CSV if no token is available
+        [datangRows, pulangRows] = await Promise.all([
+          fetchPublicGoogleSheetValues(targetId, 'ABSEN DATANG'),
+          fetchPublicGoogleSheetValues(targetId, 'ABSEN PULANG')
+        ]);
+      }
+
+      const parsed = parsePiketSheetValues(datangRows, pulangRows);
+
+      if (parsed && parsed.length > 0) {
+        setAbsenPiket(parsed);
+        const nowString = new Date().toLocaleString('id-ID', {
+          dateStyle: 'medium',
+          timeStyle: 'short'
+        });
+        setLastPiketSyncTime(nowString);
+        localStorage.setItem('kurikulum_last_piket_sync_time', nowString);
+      } else {
+        throw new Error('Tidak ada data absen piket yang berhasil dibaca atau diuraikan dari Google Sheet BUKU PIKET.');
+      }
+    } catch (err: any) {
+      console.warn('Failed to pull piket data issue:', String(err).replace(/Failed to fetch/gi, "Koneksi jaringan dibatasi (CORS)"));
+      const is403 = String(err).includes('403') || String(err).includes('Izin ditolak') || String(err).includes('access') || String(err).includes('Forbidden');
+      const isFetch = String(err).includes('Failed to fetch') || String(err).includes('failed to fetch') || String(err).includes('fetch');
+      let msg = err.message || String(err);
+      if (is403) {
+        msg = 'Izin ditolak (403): Akun Anda tidak memiliki akses ke Spreadsheet ini. Solusi: Pada Google Sheet "BUKU PIKET", klik tombol "Bagikan" (Share) lalu ubah akses umum menjadi "Siapa saja yang memiliki link" (Anyone with the link) dengan peran Penglihat (Viewer).';
+      } else if (isFetch) {
+        msg = 'Gagal memuat Piket (Koneksi jaringan dibatasi / CORS Block): Koneksi diblokir oleh peramban atau sheet belum dipublikasikan. Solusi: (1) Hubungkan Google Drive Anda di panel atas untuk melewati batasan CORS secara aman, atau (2) Pastikan spreadsheet Anda telah dipublikasikan ke web (File > Bagikan > Publikasikan ke web) dengan lembar kerja ABSEN DATANG & ABSEN PULANG.';
+      } else {
+        msg = 'Gagal menyinkronkan data Buku Piket: ' + msg;
+      }
+      setPiketSyncError(msg);
+      throw new Error(msg);
+    } finally {
+      setPiketSyncLoading(false);
     }
   };
 
@@ -695,6 +841,20 @@ export default function App() {
             onLoginGDrive={handleGoogleLogin}
           />
         );
+      case 'supervisi-absen-piket':
+        return (
+          <AbsenPiketView 
+            piketList={absenPiket}
+            onPullPiket={handlePullPiket}
+            googleSheetId={googlePiketSheetId}
+            onSaveSheetId={setGooglePiketSheetId}
+            syncLoading={piketSyncLoading}
+            syncError={piketSyncError}
+            lastSyncTime={lastPiketSyncTime}
+            gDriveToken={gDriveToken}
+            onLoginGDrive={handleGoogleLogin}
+          />
+        );
       case 'dokumen-kurikulum':
         return (
           <DokumenKurikulumView 
@@ -721,6 +881,7 @@ export default function App() {
       case 'supervisi-guru':
       case 'supervisi-administrasi': return 'Administrasi Pembelajaran';
       case 'supervisi-jurnal-kbm': return 'Jurnal Harian Mengajar Guru';
+      case 'supervisi-absen-piket': return 'Buku Absen Piket Guru';
       case 'dokumen-kurikulum': return 'Dokumen Kurikulum (KOSP)';
       default: return 'Command Center';
     }
@@ -876,6 +1037,85 @@ export default function App() {
           {renderTabContent()}
         </main>
       </div>
+
+      {/* Fallback Google OAuth Manual Token Modal */}
+      {showManualTokenModal && (
+        <div className="fixed inset-0 bg-slate-900/70 backdrop-blur-xs flex items-center justify-center p-4 z-50 animate-fade-in" id="manual-oauth-token-modal">
+          <div className="bg-white rounded-2xl max-w-md w-full overflow-hidden shadow-2xl border border-slate-200">
+            {/* Header */}
+            <div className="px-5 py-4 border-b border-slate-100 flex items-center justify-between bg-slate-50">
+              <div className="flex items-center gap-2">
+                <AlertCircle className="h-4 w-4 text-amber-500" />
+                <h4 className="font-bold text-xs text-slate-800 uppercase tracking-wider">Otentikasi Google Drive</h4>
+              </div>
+              <button
+                onClick={() => setShowManualTokenModal(false)}
+                className="text-slate-400 hover:text-slate-600 p-1 hover:bg-slate-150 rounded-full transition-colors cursor-pointer"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            {/* Content */}
+            <div className="p-5 space-y-4">
+              <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl text-[11px] text-amber-800 leading-relaxed space-y-1.5">
+                <span className="font-extrabold block text-amber-900">Mengapa pop-up tidak terbuka?</span>
+                <p>
+                  Peramban Anda memblokir jendela pop-up Google OAuth karena aplikasi dijalankan di dalam <b>iframe pratinjau AI Studio</b> yang sangat ketat.
+                </p>
+                <div className="pt-1 font-bold space-y-1 text-amber-900 text-[10px]">
+                  <p>✓ Solusi Utama: Klik tombol <span className="underline">"Buka di Tab Baru"</span> di kanan atas layar pratinjau.</p>
+                  <p>✓ Solusi Instan: Masukkan OAuth Access Token secara manual di bawah ini untuk menghubungkan Google Drive secara langsung.</p>
+                </div>
+              </div>
+
+              <form onSubmit={handleManualTokenSubmit} className="space-y-3">
+                <div className="space-y-1.5">
+                  <label className="text-[10px] font-extrabold text-slate-500 uppercase tracking-wider">Google OAuth Access Token</label>
+                  <textarea
+                    rows={3}
+                    value={manualTokenInput}
+                    onChange={(e) => {
+                      setManualTokenInput(e.target.value);
+                      setManualTokenError(null);
+                    }}
+                    placeholder="ya29.a0AcvD..."
+                    className="w-full text-xs bg-white border border-slate-200 rounded-xl px-3.5 py-2.5 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 font-mono text-slate-700 placeholder-slate-400 leading-normal"
+                  />
+                  <p className="text-[9px] text-slate-400 leading-normal">
+                    Dapatkan Access Token uji dari <a href="https://developers.google.com/oauthplayground" target="_blank" rel="noreferrer" className="text-indigo-600 hover:underline">Google OAuth Playground</a> dengan scope Google Drive.
+                  </p>
+                </div>
+
+                {manualTokenError && (
+                  <p className="text-[10px] font-bold text-rose-600">{manualTokenError}</p>
+                )}
+
+                <div className="flex justify-end gap-2 pt-1">
+                  <button
+                    type="button"
+                    onClick={() => setShowManualTokenModal(false)}
+                    className="px-4 py-2 text-xs font-semibold text-slate-500 hover:bg-slate-50 rounded-xl transition-colors cursor-pointer"
+                  >
+                    Batal
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={isLoggingIn}
+                    className="bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold px-4 py-2 rounded-xl flex items-center gap-1.5 transition-colors cursor-pointer shadow-sm disabled:opacity-50"
+                  >
+                    {isLoggingIn ? (
+                      <span className="animate-spin h-3.5 w-3.5 border-2 border-white border-t-transparent rounded-full"></span>
+                    ) : (
+                      <span>Hubungkan Token</span>
+                    )}
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

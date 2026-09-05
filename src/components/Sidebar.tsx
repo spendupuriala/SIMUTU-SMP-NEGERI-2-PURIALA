@@ -66,7 +66,8 @@ export default function Sidebar({
           icon: Users,
           children: [
             { id: 'supervisi-administrasi', label: 'Administrasi Pembelajaran' },
-            { id: 'supervisi-jurnal-kbm', label: 'Jurnal Mengajar' }
+            { id: 'supervisi-jurnal-kbm', label: 'Jurnal Mengajar' },
+            { id: 'supervisi-absen-piket', label: 'Absen Piket' }
           ]
         }
       ]
