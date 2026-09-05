@@ -660,17 +660,40 @@ export function parseCSVTo2DArray(csvText: string): any[][] {
   return result;
 }
 
+export async function fetchWithCorsProxy(url: string): Promise<string> {
+  const proxies = [
+    (u: string) => `https://corsproxy.io/?${encodeURIComponent(u)}`,
+    (u: string) => `https://api.allorigins.win/raw?url=${encodeURIComponent(u)}`
+  ];
+  
+  let lastError = null;
+  for (const proxyFn of proxies) {
+    try {
+      const proxyUrl = proxyFn(url);
+      const res = await fetch(proxyUrl);
+      if (res.ok) {
+        return await res.text();
+      }
+    } catch (err) {
+      lastError = err;
+    }
+  }
+  
+  // Try direct fetch as fallback
+  const response = await fetch(url);
+  if (response.ok) {
+    return await response.text();
+  }
+  throw lastError || new Error("Gagal mengambil data melalui CORS Proxy.");
+}
+
 export async function fetchPublicGoogleSheetValues(spreadsheetId: string, sheetName: string): Promise<any[][]> {
   try {
     const sheetIdClean = spreadsheetId.trim();
     const sheetNameEncoded = encodeURIComponent(sheetName);
     const url = `https://docs.google.com/spreadsheets/d/${sheetIdClean}/gviz/tq?tqx=out:csv&sheet=${sheetNameEncoded}`;
     
-    const response = await fetch(url);
-    if (!response.ok) {
-      throw new Error(`Gagal menghubungi Google Sheets Server (${response.status})`);
-    }
-    const csvText = await response.text();
+    const csvText = await fetchWithCorsProxy(url);
     return parseCSVTo2DArray(csvText);
   } catch (error: any) {
     console.warn('Public sheet fetch issue:', error);
@@ -681,4 +704,29 @@ export async function fetchPublicGoogleSheetValues(spreadsheetId: string, sheetN
     throw new Error(cleanMsg);
   }
 }
+
+export async function listFolderFiles(accessToken: string, folderId: string): Promise<any[]> {
+  const query = encodeURIComponent(`'${folderId}' in parents and trashed = false`);
+  const url = `https://www.googleapis.com/drive/v3/files?q=${query}&fields=files(id,name,mimeType,webViewLink,thumbnailLink,iconLink,modifiedTime,size)&pageSize=100`;
+  
+  const response = await fetch(url, {
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+    },
+  });
+
+  if (!response.ok) {
+    if (response.status === 403) {
+      throw new Error(`Izin ditolak (403): Akun Anda tidak memiliki akses ke Folder Google Drive ini.`);
+    }
+    if (response.status === 404) {
+      throw new Error(`Folder tidak ditemukan (404): Periksa kembali ID Folder Google Drive Anda.`);
+    }
+    throw new Error(`Gagal membaca data dari Google Drive (${response.status})`);
+  }
+
+  const data = await response.json();
+  return data.files || [];
+}
+
 

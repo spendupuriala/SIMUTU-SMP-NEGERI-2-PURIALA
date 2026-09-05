@@ -17,14 +17,17 @@ import {
   User,
   ExternalLink,
   ChevronRight,
-  CheckCircle
+  CheckCircle,
+  RefreshCw,
+  Settings
 } from 'lucide-react';
 import { DokumenKurikulum } from '../types';
-import { findOrCreateFolder, uploadFileToGoogleDrive } from '../lib/googleDriveApi';
+import { findOrCreateFolder, uploadFileToGoogleDrive, listFolderFiles } from '../lib/googleDriveApi';
 
 interface DokumenKurikulumProps {
   documents: DokumenKurikulum[];
   onUploadDocument: (doc: Omit<DokumenKurikulum, 'id'>) => void;
+  onSyncDocuments?: (docs: DokumenKurikulum[]) => void;
   onAddRevisi: (id: string, revisi: DokumenKurikulum['riwayatRevisi'][0]) => void;
   onDeleteDocument?: (id: string) => void;
   gDriveToken?: string | null;
@@ -34,6 +37,7 @@ interface DokumenKurikulumProps {
 export default function DokumenKurikulumView({
   documents,
   onUploadDocument,
+  onSyncDocuments,
   onAddRevisi,
   onDeleteDocument,
   gDriveToken,
@@ -64,6 +68,16 @@ export default function DokumenKurikulumView({
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [localSuccessMsg, setLocalSuccessMsg] = useState<string | null>(null);
 
+  // Google Drive Folder Scanner State
+  const [driveFolderId, setDriveFolderId] = useState<string>(() => {
+    return localStorage.getItem('kurikulum_folder_drive_id') || '14NcK1EBRBU8JU9mTI56qgLuw1YKz8cI-';
+  });
+  const [isConfigOpen, setIsConfigOpen] = useState(false);
+  const [tempDriveFolderId, setTempDriveFolderId] = useState(driveFolderId);
+  const [isScanningDrive, setIsScanningDrive] = useState(false);
+  const [scanError, setScanError] = useState<string | null>(null);
+  const [scanSuccessMsg, setScanSuccessMsg] = useState<string | null>(null);
+
   const formatBytes = (bytes: number, decimals = 1) => {
     if (bytes === 0) return '0 Bytes';
     const k = 1024;
@@ -71,6 +85,109 @@ export default function DokumenKurikulumView({
     const sizes = ['Bytes', 'KB', 'MB', 'GB'];
     const i = Math.floor(Math.log(bytes) / Math.log(k));
     return parseFloat((bytes / Math.pow(k, i)).toFixed(dm)) + ' ' + sizes[i];
+  };
+
+  const handleScanDriveFolder = async () => {
+    if (!gDriveToken) {
+      if (onLoginGDrive) {
+        await onLoginGDrive();
+      } else {
+        setScanError("Google Drive tidak terhubung.");
+      }
+      return;
+    }
+
+    setIsScanningDrive(true);
+    setScanError(null);
+    setScanSuccessMsg(null);
+
+    try {
+      const files = await listFolderFiles(gDriveToken, driveFolderId);
+      
+      const mappedDocs: DokumenKurikulum[] = files.map(file => {
+        let sizeStr = '1.5 MB';
+        if (file.size) {
+          const sizeNum = parseInt(file.size);
+          if (!isNaN(sizeNum)) {
+            sizeStr = formatBytes(sizeNum);
+          }
+        }
+
+        const nameLower = file.name.toLowerCase();
+        let kategori: DokumenKurikulum['kategori'] = 'Buku I KOSP';
+        if (nameLower.includes('silabus') || nameLower.includes('atp') || nameLower.includes('buku ii') || nameLower.includes('buku 2')) {
+          kategori = 'Buku II Silabus/ATP';
+        } else if (nameLower.includes('rpp') || nameLower.includes('modul') || nameLower.includes('buku iii') || nameLower.includes('buku 3') || nameLower.includes('ajar')) {
+          kategori = 'Buku III RPP/Modul';
+        } else if (nameLower.includes('sk ') || nameLower.includes('sk-') || nameLower.includes('tugas') || nameLower.includes('pembagian') || nameLower.includes('mengajar')) {
+          kategori = 'SK Pembagian Tugas';
+        } else if (nameLower.includes('panduan') || nameLower.includes('akademik')) {
+          kategori = 'Panduan Akademik';
+        }
+
+        let dateStr = new Date().toISOString().split('T')[0];
+        if (file.modifiedTime) {
+          try {
+            dateStr = new Date(file.modifiedTime).toISOString().split('T')[0];
+          } catch (_) {}
+        }
+
+        let tahunAjaran = '2026/2027';
+        const tahunMatch = file.name.match(/20\d{2}\/20\d{2}/);
+        if (tahunMatch) {
+          tahunAjaran = tahunMatch[0];
+        } else {
+          const singleYearMatch = file.name.match(/20\d{2}/);
+          if (singleYearMatch) {
+            const y1 = parseInt(singleYearMatch[0]);
+            tahunAjaran = `${y1}/${y1 + 1}`;
+          }
+        }
+
+        return {
+          id: `doc-drive-${file.id}`,
+          namaFile: file.name,
+          kategori,
+          tahunAjaran,
+          status: 'Final',
+          tanggalDibuat: dateStr,
+          pembuat: 'Google Drive',
+          ukuran: sizeStr,
+          driveFileId: file.id,
+          driveSynced: true,
+          driveSyncTime: new Date().toLocaleString('id-ID'),
+          driveUrl: file.webViewLink || `https://drive.google.com/open?id=${file.id}`,
+          riwayatRevisi: [
+            {
+              versi: 'v1.0',
+              tanggal: dateStr,
+              oleh: 'Google Drive',
+              keterangan: 'Sinkronisasi otomatis dari Google Drive Folder.'
+            }
+          ]
+        };
+      });
+
+      if (onSyncDocuments) {
+        onSyncDocuments(mappedDocs);
+        setScanSuccessMsg(`Berhasil memindai ${mappedDocs.length} berkas dari Google Drive.`);
+      } else {
+        setScanError("Handler sinkronisasi tidak terkonfigurasi di aplikasi utama.");
+      }
+    } catch (err: any) {
+      console.warn("Scan drive error:", err);
+      setScanError(err.message || "Gagal memindai folder Google Drive.");
+    } finally {
+      setIsScanningDrive(false);
+    }
+  };
+
+  const handleSaveFolderId = (newId: string) => {
+    const cleanId = newId.trim();
+    setDriveFolderId(cleanId);
+    localStorage.setItem('kurikulum_folder_drive_id', cleanId);
+    setIsConfigOpen(false);
+    setScanSuccessMsg("Konfigurasi ID Folder berhasil disimpan.");
   };
 
   const handleFileDrop = (e: React.DragEvent) => {
@@ -225,15 +342,82 @@ export default function DokumenKurikulumView({
           </p>
         </div>
         
-        <button 
-          onClick={() => setIsUploadOpen(true)}
-          className="flex items-center gap-1.5 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-xl transition-all shadow-md shadow-emerald-600/10 self-start md:self-center shrink-0 cursor-pointer"
-          id="btn-upload-dokumen"
-        >
-          <Upload className="h-4 w-4" />
-          Unggah Dokumen KOSP
-        </button>
+        <div className="flex flex-wrap items-center gap-2 self-start md:self-center shrink-0">
+          {/* Configure Folder ID Button */}
+          <button
+            onClick={() => {
+              setTempDriveFolderId(driveFolderId);
+              setIsConfigOpen(true);
+            }}
+            className="flex items-center justify-center p-2 bg-slate-100 hover:bg-slate-200 text-slate-600 hover:text-slate-800 rounded-xl transition-all border border-slate-200/60 cursor-pointer"
+            title="Konfigurasi Folder Google Drive"
+            id="btn-config-folder-drive"
+          >
+            <Settings className="h-4 w-4" />
+          </button>
+
+          {/* Sync Folder Button */}
+          <button
+            onClick={handleScanDriveFolder}
+            disabled={isScanningDrive}
+            className="flex items-center gap-1.5 px-3 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white text-xs font-bold rounded-xl transition-all shadow-md shadow-indigo-600/10 cursor-pointer"
+            id="btn-scan-folder-drive"
+          >
+            <RefreshCw className={`h-4 w-4 ${isScanningDrive ? 'animate-spin' : ''}`} />
+            {isScanningDrive ? 'Memindai...' : 'Pindai Folder Drive'}
+          </button>
+
+          {/* Upload Button */}
+          <button 
+            onClick={() => setIsUploadOpen(true)}
+            className="flex items-center gap-1.5 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-xl transition-all shadow-md shadow-emerald-600/10 cursor-pointer"
+            id="btn-upload-dokumen"
+          >
+            <Upload className="h-4 w-4" />
+            Unggah Dokumen KOSP
+          </button>
+        </div>
       </div>
+
+      {scanError && (
+        <div className="bg-rose-50 border border-rose-200 text-rose-800 p-4 rounded-xl text-xs flex items-center justify-between shadow-xs transition-all animate-fade-in" id="drive-scan-error-banner">
+          <div className="flex items-center gap-3">
+            <div className="bg-rose-100 p-1.5 rounded-full text-rose-600">
+              <AlertCircle className="h-4 w-4" />
+            </div>
+            <div>
+              <span className="font-bold block text-rose-900">Gagal Memindai Folder</span>
+              <p className="text-[10px] text-rose-700 mt-0.5">{scanError}</p>
+            </div>
+          </div>
+          <button 
+            onClick={() => setScanError(null)}
+            className="text-rose-500 hover:text-rose-700 text-xs font-bold px-2 py-1 cursor-pointer transition-colors"
+          >
+            Tutup
+          </button>
+        </div>
+      )}
+
+      {scanSuccessMsg && (
+        <div className="bg-indigo-50 border border-indigo-200 text-indigo-800 p-4 rounded-xl text-xs flex items-center justify-between shadow-xs transition-all animate-fade-in" id="drive-scan-success-banner">
+          <div className="flex items-center gap-3">
+            <div className="bg-indigo-100 p-1.5 rounded-full text-indigo-600">
+              <CheckCircle className="h-4 w-4" />
+            </div>
+            <div>
+              <span className="font-bold block text-indigo-900">Sinkronisasi Folder Berhasil</span>
+              <p className="text-[10px] text-indigo-700 mt-0.5">{scanSuccessMsg}</p>
+            </div>
+          </div>
+          <button 
+            onClick={() => setScanSuccessMsg(null)}
+            className="text-indigo-500 hover:text-indigo-700 text-xs font-bold px-2 py-1 cursor-pointer transition-colors"
+          >
+            Tutup
+          </button>
+        </div>
+      )}
 
       {localSuccessMsg && (
         <div className="bg-emerald-50 border border-emerald-200 text-emerald-800 p-4 rounded-xl text-xs flex items-center justify-between shadow-xs transition-all animate-fade-in" id="local-upload-success-banner">
@@ -760,6 +944,66 @@ export default function DokumenKurikulumView({
               >
                 Hapus Berkas
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* DRIVE FOLDER CONFIGURATION MODAL */}
+      {isConfigOpen && (
+        <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-900/50 backdrop-blur-xs flex justify-center items-center p-4" id="drive-folder-config-modal">
+          <div className="bg-white rounded-2xl shadow-xl max-w-md w-full overflow-hidden border border-slate-200 animate-fade-in">
+            {/* Header */}
+            <div className="px-5 py-4 border-b border-slate-100 flex items-center justify-between bg-slate-50">
+              <div className="flex items-center gap-2 text-indigo-600">
+                <Settings className="h-5 w-5" />
+                <h3 className="font-bold text-sm text-slate-800 uppercase tracking-wider">Konfigurasi Folder Drive</h3>
+              </div>
+              <button 
+                onClick={() => setIsConfigOpen(false)}
+                className="text-slate-400 hover:text-slate-600 p-1 hover:bg-slate-100 rounded-full transition-colors cursor-pointer"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            {/* Body */}
+            <div className="p-5 space-y-4">
+              <p className="text-xs text-slate-500 leading-relaxed">
+                Tentukan <b>ID Folder Google Drive</b> tempat dokumen kurikulum diarsip. Nama folder default di Drive adalah <span className="font-bold text-indigo-600">"Kurikulum"</span>.
+              </p>
+
+              <div className="space-y-1.5">
+                <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Google Drive Folder ID</label>
+                <input 
+                  type="text" 
+                  value={tempDriveFolderId}
+                  onChange={(e) => setTempDriveFolderId(e.target.value)}
+                  placeholder="Contoh: 14NcK1EBRBU8JU9mTI56qgLuw1YKz8cI-"
+                  className="w-full text-xs p-2.5 bg-slate-50 border border-slate-200 focus:border-indigo-500 rounded-lg outline-none transition-all font-mono"
+                />
+                <p className="text-[9px] text-slate-400 leading-normal">
+                  Dapatkan ID ini dari bagian URL saat Anda membuka folder tersebut di Google Drive (misal: drive.google.com/drive/folders/<b>ID_FOLDER_ANDA</b>).
+                </p>
+              </div>
+
+              {/* Actions */}
+              <div className="pt-2 flex items-center justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setIsConfigOpen(false)}
+                  className="px-4 py-2 hover:bg-slate-100 text-slate-500 text-xs font-bold rounded-xl border border-slate-200 transition-colors cursor-pointer"
+                >
+                  Batal
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleSaveFolderId(tempDriveFolderId)}
+                  className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-xl transition-all shadow-md shadow-indigo-600/10 cursor-pointer"
+                >
+                  Simpan Perubahan
+                </button>
+              </div>
             </div>
           </div>
         </div>

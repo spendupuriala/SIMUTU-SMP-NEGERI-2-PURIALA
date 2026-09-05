@@ -160,6 +160,33 @@ export function parseCSVToNilai(csvText: string): SiswaNilai[] {
   });
 }
 
+export async function fetchWithCorsProxy(url: string): Promise<string> {
+  const proxies = [
+    (u: string) => `https://corsproxy.io/?${encodeURIComponent(u)}`,
+    (u: string) => `https://api.allorigins.win/raw?url=${encodeURIComponent(u)}`
+  ];
+  
+  let lastError = null;
+  for (const proxyFn of proxies) {
+    try {
+      const proxyUrl = proxyFn(url);
+      const res = await fetch(proxyUrl);
+      if (res.ok) {
+        return await res.text();
+      }
+    } catch (err) {
+      lastError = err;
+    }
+  }
+  
+  // Try direct fetch as fallback
+  const response = await fetch(url);
+  if (response.ok) {
+    return await response.text();
+  }
+  throw lastError || new Error("Gagal mengambil data melalui CORS Proxy.");
+}
+
 /**
  * Fetches data directly from Google Sheets published CSV export.
  */
@@ -168,11 +195,7 @@ export async function fetchGoogleSheetNilai(spreadsheetId: string = DEFAULT_SPRE
     const sheetIdClean = spreadsheetId.trim();
     const url = `https://docs.google.com/spreadsheets/d/${sheetIdClean}/gviz/tq?tqx=out:csv&sheet=${DEFAULT_SHEET_NAME}`;
     
-    const response = await fetch(url);
-    if (!response.ok) {
-      throw new Error(`Gagal menghubungi Google Sheets Server (${response.status})`);
-    }
-    const csvText = await response.text();
+    const csvText = await fetchWithCorsProxy(url);
     return parseCSVToNilai(csvText);
   } catch (error: any) {
     console.warn('Google Sheet fetch issue:', error);
@@ -278,11 +301,7 @@ export async function fetchGoogleSheetJurnal(spreadsheetId: string = DEFAULT_SPR
     const sheetNameEncoded = encodeURIComponent("JURNAL MENGAJAR");
     const url = `https://docs.google.com/spreadsheets/d/${sheetIdClean}/gviz/tq?tqx=out:csv&sheet=${sheetNameEncoded}`;
     
-    const response = await fetch(url);
-    if (!response.ok) {
-      throw new Error(`Gagal menghubungi Google Sheets Server (${response.status})`);
-    }
-    const csvText = await response.text();
+    const csvText = await fetchWithCorsProxy(url);
     return parseCSVToJurnal(csvText);
   } catch (error: any) {
     console.warn('Google Sheet Jurnal fetch issue:', error);

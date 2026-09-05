@@ -379,7 +379,6 @@ export default function App() {
         msg = "Gagal menyinkronkan data Jurnal Mengajar dari Google Sheets: " + msg;
       }
       setJurnalSyncError(msg);
-      throw new Error(msg);
     } finally {
       setJurnalSyncLoading(false);
     }
@@ -443,7 +442,6 @@ export default function App() {
         msg = 'Gagal menyinkronkan data Buku Piket: ' + msg;
       }
       setPiketSyncError(msg);
-      throw new Error(msg);
     } finally {
       setPiketSyncLoading(false);
     }
@@ -713,6 +711,34 @@ export default function App() {
     setDocuments(prev => [doc, ...prev]);
   };
 
+  // Handler: Bulk merge / Sync curriculum documents from Google Drive
+  const handleSyncDocuments = (syncedDocs: DokumenKurikulum[]) => {
+    setDocuments(prev => {
+      const updated = [...prev];
+      syncedDocs.forEach(newDoc => {
+        const existingIdx = updated.findIndex(d => 
+          (newDoc.driveFileId && d.driveFileId === newDoc.driveFileId) || 
+          d.namaFile.toLowerCase() === newDoc.namaFile.toLowerCase()
+        );
+        if (existingIdx > -1) {
+          updated[existingIdx] = {
+            ...updated[existingIdx],
+            ...newDoc,
+            riwayatRevisi: [
+              ...updated[existingIdx].riwayatRevisi,
+              ...newDoc.riwayatRevisi.filter(nr => 
+                !updated[existingIdx].riwayatRevisi.some(er => er.versi === nr.versi)
+              )
+            ]
+          };
+        } else {
+          updated.unshift(newDoc);
+        }
+      });
+      return updated;
+    });
+  };
+
   // Handler: Record revision history for curriculum file
   const handleAddRevisi = (id: string, revisi: DokumenKurikulum['riwayatRevisi'][0]) => {
     setDocuments(prev => prev.map(d => {
@@ -860,6 +886,7 @@ export default function App() {
           <DokumenKurikulumView 
             documents={documents}
             onUploadDocument={handleUploadDocument}
+            onSyncDocuments={handleSyncDocuments}
             onAddRevisi={handleAddRevisi}
             onDeleteDocument={handleDeleteDocument}
             gDriveToken={gDriveToken}
