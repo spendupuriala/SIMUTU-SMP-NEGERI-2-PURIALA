@@ -54,6 +54,7 @@ import {
 export default function App() {
   // Navigation active tab State
   const [activeTab, setActiveTab] = useState<string>('dashboard');
+  const [isSidebarOpen, setIsSidebarOpen] = useState<boolean>(false);
 
   // Google Drive Auth states
   const [gDriveUser, setGDriveUser] = useState<any | null>(null);
@@ -916,6 +917,15 @@ export default function App() {
 
   return (
     <div className="flex bg-slate-50 min-h-screen text-slate-800 font-sans" id="applet-viewport">
+      {/* Dark Mobile Backdrop Overlay */}
+      {isSidebarOpen && (
+        <div 
+          onClick={() => setIsSidebarOpen(false)}
+          className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs z-40 md:hidden animate-fade-in"
+          id="sidebar-mobile-overlay"
+        />
+      )}
+
       {/* Sidebar Navigation */}
       <Sidebar 
         activeTab={activeTab} 
@@ -926,21 +936,35 @@ export default function App() {
         isLoggingIn={isLoggingIn}
         onLogin={handleGoogleLogin}
         onLogout={handleGoogleLogout}
+        isMobileOpen={isSidebarOpen}
+        onCloseSidebar={() => setIsSidebarOpen(false)}
       />
 
       {/* Main Command Center Stage */}
       <div className="flex-1 flex flex-col min-w-0" id="main-content-scroll-container">
         {/* Top Control Bar Header */}
-        <header className="bg-white h-16 border-b border-slate-200/80 px-6 flex items-center justify-between sticky top-0 z-30 shadow-xs non-printable" id="top-bar-header">
-          {/* Left: Title & Info Sekolah */}
-          <div className="flex flex-col md:flex-row md:items-center gap-1 md:gap-3">
-            <h2 className="font-bold text-sm text-slate-800 tracking-wide uppercase">
-              {getPageTitle()}
-            </h2>
-            <div className="hidden sm:flex items-center gap-1 text-[10px] bg-slate-100 text-slate-500 px-2 py-0.5 rounded-full font-extrabold border border-slate-200/50">
-              <span>SIMUTU</span>
-              <span className="text-slate-300">•</span>
-              <span>SMP Negeri 2 Puriala</span>
+        <header className="bg-white border-b border-slate-200/80 px-6 flex items-center justify-between sticky top-0 z-30 shadow-xs non-printable pt-[env(safe-area-inset-top,0px)] min-h-[4rem] h-auto md:h-16 py-3 md:py-0" id="top-bar-header">
+          {/* Left: Hamburger + Title & Info Sekolah */}
+          <div className="flex items-center gap-3">
+            {/* Hamburger Button on Mobile */}
+            <button
+              onClick={() => setIsSidebarOpen(prev => !prev)}
+              className="md:hidden p-2 -ml-2 rounded-lg text-slate-600 hover:text-slate-950 hover:bg-slate-100 transition-colors focus:outline-none cursor-pointer"
+              id="hamburger-menu-btn"
+              title="Menu Navigasi"
+            >
+              <Menu className="h-5 w-5" />
+            </button>
+            
+            <div className="flex flex-col md:flex-row md:items-center gap-1 md:gap-3">
+              <h2 className="font-bold text-sm text-slate-800 tracking-wide uppercase leading-tight">
+                {getPageTitle()}
+              </h2>
+              <div className="hidden sm:flex items-center gap-1 text-[10px] bg-slate-100 text-slate-500 px-2 py-0.5 rounded-full font-extrabold border border-slate-200/50">
+                <span>SIMUTU</span>
+                <span className="text-slate-300">•</span>
+                <span>SMP Negeri 2 Puriala</span>
+              </div>
             </div>
           </div>
 

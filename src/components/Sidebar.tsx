@@ -6,7 +6,8 @@ import {
   Users, 
   FileText,
   School,
-  ChevronRight
+  ChevronRight,
+  X
 } from 'lucide-react';
 
 interface SidebarProps {
@@ -18,6 +19,8 @@ interface SidebarProps {
   isLoggingIn: boolean;
   onLogin: () => void;
   onLogout: () => void;
+  isMobileOpen?: boolean;
+  onCloseSidebar?: () => void;
 }
 
 export default function Sidebar({ 
@@ -28,7 +31,9 @@ export default function Sidebar({
   gDriveNeedsAuth,
   isLoggingIn,
   onLogin,
-  onLogout
+  onLogout,
+  isMobileOpen = false,
+  onCloseSidebar
 }: SidebarProps) {
   
   const menuGroups = [
@@ -85,7 +90,12 @@ export default function Sidebar({
   ];
 
   return (
-    <aside className="w-64 bg-slate-900 text-slate-100 flex flex-col h-screen sticky top-0 border-r border-slate-800 shadow-xl select-none z-10 shrink-0" id="sidebar-container">
+    <aside 
+      className={`fixed inset-y-0 left-0 z-50 md:sticky md:flex w-64 bg-slate-900 text-slate-100 flex flex-col h-screen top-0 border-r border-slate-800 shadow-xl select-none shrink-0 transition-transform duration-300 ease-in-out ${
+        isMobileOpen ? 'translate-x-0' : '-translate-x-full'
+      } md:translate-x-0`}
+      id="sidebar-container"
+    >
       {/* Compact Brand Header */}
       <div className="p-4 border-b border-slate-800 flex items-center justify-between" id="sidebar-header">
         <div className="flex items-center gap-2.5">
@@ -110,6 +120,18 @@ export default function Sidebar({
             <p className="text-[9px] text-emerald-400 font-bold mt-1 tracking-wide uppercase">SMPN 2 Puriala</p>
           </div>
         </div>
+
+        {/* Mobile Close Button */}
+        {onCloseSidebar && (
+          <button
+            onClick={onCloseSidebar}
+            className="md:hidden p-1 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors cursor-pointer"
+            id="sidebar-close-btn"
+            title="Tutup Navigasi"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        )}
       </div>
 
       {/* Structured Compact Navigation */}
@@ -135,6 +157,7 @@ export default function Sidebar({
                         } else {
                           setActiveTab(item.id);
                         }
+                        if (onCloseSidebar) onCloseSidebar();
                       }}
                       className={`w-full flex items-center justify-between text-left px-2.5 py-1.5 rounded-lg transition-all duration-150 group relative ${
                         isActive 
@@ -168,7 +191,10 @@ export default function Sidebar({
                           return (
                             <button
                               key={child.id}
-                              onClick={() => setActiveTab(child.id)}
+                              onClick={() => {
+                                setActiveTab(child.id);
+                                if (onCloseSidebar) onCloseSidebar();
+                              }}
                               className={`w-full text-left py-1 px-2.5 text-[10px] rounded transition-all ${
                                 isChildActive
                                   ? 'text-white bg-slate-800 font-extrabold'

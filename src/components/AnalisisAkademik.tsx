@@ -1536,6 +1536,7 @@ export default function AnalisisAkademik({
             onRefreshFromGoogleSheets?.(id);
           }}
           onClose={() => setIsDrivePickerOpen(false)}
+          onReauth={onLoginGDrive}
         />
       )}
 

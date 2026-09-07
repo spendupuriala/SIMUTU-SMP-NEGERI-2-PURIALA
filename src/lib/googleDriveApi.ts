@@ -38,6 +38,9 @@ export async function listGoogleDriveSpreadsheets(accessToken: string): Promise<
   });
 
   if (!response.ok) {
+    if (response.status === 401) {
+      throw new Error(`Gagal memuat daftar Google Drive (401) - Sesi login Google Drive Anda telah berakhir. Silakan hubungkan kembali akun Anda.`);
+    }
     throw new Error(`Gagal memuat daftar Google Drive (${response.status})`);
   }
 

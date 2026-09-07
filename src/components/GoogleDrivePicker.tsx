@@ -6,9 +6,10 @@ interface GoogleDrivePickerProps {
   token: string;
   onSelect: (spreadsheetId: string, spreadsheetName: string) => void;
   onClose: () => void;
+  onReauth?: () => void;
 }
 
-export default function GoogleDrivePicker({ token, onSelect, onClose }: GoogleDrivePickerProps) {
+export default function GoogleDrivePicker({ token, onSelect, onClose, onReauth }: GoogleDrivePickerProps) {
   const [files, setFiles] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -93,12 +94,27 @@ export default function GoogleDrivePicker({ token, onSelect, onClose }: GoogleDr
               <AlertCircle className="h-8 w-8 text-rose-500" />
               <p className="text-xs text-slate-800 font-bold">Gagal Memuat Berkas</p>
               <p className="text-[11px] text-slate-500 max-w-xs">{error}</p>
-              <button 
-                onClick={loadFiles}
-                className="mt-2 px-3 py-1.5 bg-indigo-600 text-white font-semibold text-xs rounded-lg hover:bg-indigo-500 transition-all"
-              >
-                Coba Lagi
-              </button>
+              
+              <div className="flex items-center gap-2 mt-2">
+                {error.includes('401') && onReauth ? (
+                  <button 
+                    onClick={() => {
+                      onClose();
+                      onReauth();
+                    }}
+                    className="px-3 py-1.5 bg-indigo-600 text-white font-bold text-xs rounded-lg hover:bg-indigo-500 transition-all cursor-pointer shadow-xs"
+                  >
+                    Hubungkan Ulang Google Drive
+                  </button>
+                ) : (
+                  <button 
+                    onClick={loadFiles}
+                    className="px-3 py-1.5 bg-indigo-600 text-white font-semibold text-xs rounded-lg hover:bg-indigo-500 transition-all cursor-pointer"
+                  >
+                    Coba Lagi
+                  </button>
+                )}
+              </div>
             </div>
           ) : filteredFiles.length === 0 ? (
             <div className="flex-1 flex flex-col justify-center items-center gap-1.5 text-center p-6 py-10 text-slate-400">
